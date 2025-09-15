@@ -6,8 +6,8 @@ description = "Cross-shell config emitter for Orbit (aliases, PATH, env) via a s
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/suhailphotos/apogee"
-keywords = ["shell", "zsh", "bash", "powershell", "config", "env"]
+keywords = ["shell", "zsh", "bash", "powershell", "config"]   # <= five total
 categories = ["command-line-utilities"]
 
-# optional: keep upload small
+# Keep package small (optional)
 include = ["src/**", "Cargo.toml", "README.md", "LICENSE*", "CHANGELOG.md"]
