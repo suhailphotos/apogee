@@ -1,4 +1,4 @@
 fn main() {
-    println!("# apogee: pre-alpha placeholder");
-    println!("alias apogee_ok='echo apogee is alive'");
+    // Emit one shell line. Uses $DROPBOX if set, else macOS default path.
+    println!(r#"cd "${{DROPBOX:-$HOME/Library/CloudStorage/Dropbox}}""#);
 }

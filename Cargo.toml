@@ -11,3 +11,6 @@ categories = ["command-line-utilities"]
 
 # Keep package small (optional)
 include = ["src/**", "Cargo.toml", "README.md", "LICENSE*", "CHANGELOG.md"]
+
+[dependencies]
+serde = { version = "1.0.225", features = ["derive"] }
