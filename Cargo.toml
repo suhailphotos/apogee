@@ -1,20 +1,22 @@
 [package]
 name = "apogee"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 description = "Cross-shell config emitter for Orbit (aliases, PATH, env) via a single eval."
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/suhailphotos/apogee"
-keywords = ["shell", "zsh", "bash", "powershell", "config"]   # <= five total
+keywords = ["shell", "zsh", "bash", "powershell", "config"]
 categories = ["command-line-utilities"]
-
-# Keep package small (optional)
 include = ["src/**", "Cargo.toml", "README.md", "LICENSE*", "CHANGELOG.md"]
 
 [dependencies]
 anyhow = "1"
-clap = { version = "4.5", features = ["derive", "env"] }  # ← add "env"
+clap = { version = "4.5", features = ["derive", "env"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 dirs = "5"
+
+[features]
+default = []
+report = []
