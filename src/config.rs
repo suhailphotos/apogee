@@ -7,7 +7,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Default path: $XDG_CONFIG_HOME/apogee/config.toml, else ~/.config/apogee/config.toml
 pub fn default_config_path() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
@@ -79,9 +78,6 @@ pub enum Platform {
     Other,
 }
 
-/// Top-level [modules] section:
-/// - enable_* knobs
-/// - nested [modules.cloud], [modules.apps], [modules.hooks]
 #[derive(Debug, Default, Deserialize)]
 pub struct ModulesRoot {
     #[serde(default = "default_true")]
@@ -274,6 +270,79 @@ pub struct DetectBlock {
 
     #[serde(default)]
     pub env: AnyOf,
+
+    #[serde(default)]
+    pub version: Option<VersionDetectSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum VersionDetectSpec {
+    Single(VersionDetect),
+    PerPlatform(PlatformVersionDetect),
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct PlatformVersionDetect {
+    #[serde(default)]
+    pub mac: Option<VersionDetect>,
+    #[serde(default)]
+    pub linux: Option<VersionDetect>,
+    #[serde(default)]
+    pub windows: Option<VersionDetect>,
+    #[serde(default)]
+    pub wsl: Option<VersionDetect>,
+    #[serde(default)]
+    pub other: Option<VersionDetect>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum VersionDetect {
+    Tagged(VersionDetectTagged),
+
+    // shorthand command
+    Command {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+
+        #[serde(default)]
+        regex: Option<String>,
+        #[serde(default = "default_version_capture")]
+        capture: String,
+    },
+
+    // shorthand path regex
+    PathRegex {
+        regex: String,
+        #[serde(default = "default_version_capture")]
+        capture: String,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum VersionDetectTagged {
+    Command {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+
+        #[serde(default)]
+        regex: Option<String>,
+        #[serde(default = "default_version_capture")]
+        capture: String,
+    },
+    PathRegex {
+        regex: String,
+        #[serde(default = "default_version_capture")]
+        capture: String,
+    },
+}
+
+fn default_version_capture() -> String {
+    "version".to_string()
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -309,6 +378,18 @@ pub struct EmitBlock {
 
     #[serde(default)]
     pub functions: FunctionsEmit,
+
+    #[serde(default)]
+    pub paths: PathsEmit,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct PathsEmit {
+    #[serde(default)]
+    pub prepend_if_exists: Vec<String>,
+
+    #[serde(default)]
+    pub append_if_exists: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
