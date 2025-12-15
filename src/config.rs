@@ -53,6 +53,49 @@ pub struct ApogeeMeta {
 
     #[serde(default)]
     pub secrets_file: Option<String>,
+
+    #[serde(default)]
+    pub bootstrap: Option<BootstrapConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct BootstrapConfig {
+    #[serde(default)]
+    pub defaults: BootstrapDefaults,
+
+    #[serde(default)]
+    pub secrets: BootstrapSecrets,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct BootstrapDefaults {
+    #[serde(default)]
+    pub env: EnvMap,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BootstrapSecrets {
+    #[serde(default = "default_secrets_strategy")]
+    pub strategy: SecretsStrategy,
+}
+
+impl Default for BootstrapSecrets {
+    fn default() -> Self {
+        Self {
+            strategy: default_secrets_strategy(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecretsStrategy {
+    FillMissing,
+    Override,
+}
+
+fn default_secrets_strategy() -> SecretsStrategy {
+    SecretsStrategy::FillMissing
 }
 
 fn default_shell() -> Shell {
@@ -145,17 +188,11 @@ pub struct ShellAliasMaps {
 pub type AliasMap = BTreeMap<String, String>;
 pub type EnvMap = BTreeMap<String, String>;
 
-/// --------------------
-/// CLOUD MODULES (generic!)
-/// --------------------
-
 #[derive(Debug, Default, Deserialize)]
 pub struct CloudModules {
     #[serde(default = "default_true")]
     pub enabled: bool,
 
-    /// Any nested table under [modules.cloud.*] becomes an entry here.
-    /// Example: [modules.cloud.dropbox] -> key "dropbox"
     #[serde(flatten, default)]
     pub items: BTreeMap<String, CloudModule>,
 }
@@ -184,17 +221,11 @@ pub enum CloudKind {
     Service,
 }
 
-/// --------------------
-/// APP MODULES (generic!)
-/// --------------------
-
 #[derive(Debug, Default, Deserialize)]
 pub struct AppModules {
     #[serde(default = "default_true")]
     pub enabled: bool,
 
-    /// Any nested table under [modules.apps.*] becomes an entry here.
-    /// Example: [modules.apps.git] -> key "git"
     #[serde(flatten, default)]
     pub items: BTreeMap<String, AppModule>,
 }
@@ -223,10 +254,6 @@ pub enum AppKind {
     Desktop,
 }
 
-/// --------------------
-/// HOOKS MODULES
-/// --------------------
-
 #[derive(Debug, Default, Deserialize)]
 pub struct HooksModules {
     #[serde(default = "default_true")]
@@ -252,10 +279,6 @@ pub struct HookItem {
 
     pub script: String,
 }
-
-/// --------------------
-/// DETECT / EMIT blocks
-/// --------------------
 
 #[derive(Debug, Default, Deserialize)]
 pub struct DetectBlock {
@@ -301,7 +324,6 @@ pub struct PlatformVersionDetect {
 pub enum VersionDetect {
     Tagged(VersionDetectTagged),
 
-    // shorthand command
     Command {
         command: String,
         #[serde(default)]
@@ -313,7 +335,6 @@ pub enum VersionDetect {
         capture: String,
     },
 
-    // shorthand path regex
     PathRegex {
         regex: String,
         #[serde(default = "default_version_capture")]

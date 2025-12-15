@@ -13,10 +13,7 @@ fn summary(cfg: &config::Config) -> String {
 
     out.push_str("apogee report (summary)\n");
     out.push_str("======================\n");
-    out.push_str(&format!(
-        "schema_version: {}\n",
-        cfg.apogee.schema_version
-    ));
+    out.push_str(&format!("schema_version: {}\n", cfg.apogee.schema_version));
     out.push_str(&format!("default_shell: {:?}\n", cfg.apogee.default_shell));
 
     out.push_str("\nmodules\n");
