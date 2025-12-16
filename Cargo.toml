@@ -1,6 +1,6 @@
 [package]
 name = "apogee"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 description = "Cross-shell config emitter for Orbit (aliases, PATH, env) via a single eval."
 license = "MIT"
