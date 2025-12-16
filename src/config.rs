@@ -3,8 +3,8 @@
 use anyhow::Result;
 use serde::Deserialize;
 use std::{
-  fmt,
   collections::BTreeMap,
+  fmt,
   path::{Path, PathBuf},
 };
 
@@ -19,7 +19,7 @@ pub fn default_config_path() -> PathBuf {
       .join(".config")
       .join("apogee")
       .join("config.toml");
-    }
+  }
   PathBuf::from("apogee/config.toml")
 }
 
@@ -97,6 +97,10 @@ pub struct ApogeeMeta {
   #[serde(default)]
   pub platforms: Vec<Platform>,
 
+  /// Default: "{config_dir}/.env" (applied by runtime builder if None)
+  #[serde(default)]
+  pub env_file: Option<String>,
+
   #[serde(default)]
   pub secrets_file: Option<String>,
 
@@ -168,8 +172,6 @@ impl fmt::Display for Shell {
     write!(f, "{s}")
   }
 }
-
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -374,23 +376,21 @@ pub struct DetectBlock {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VersionDetectSpec {
-    #[serde(default)]
-    pub all: Option<VersionDetect>,
-    #[serde(default)]
-    pub mac: Option<VersionDetect>,
-    #[serde(default)]
-    pub linux: Option<VersionDetect>,
-    #[serde(default)]
-    pub windows: Option<VersionDetect>,
-    #[serde(default)]
-    pub wsl: Option<VersionDetect>,
-    #[serde(default)]
-    pub other: Option<VersionDetect>,
+  #[serde(default)]
+  pub all: Option<VersionDetect>,
+  #[serde(default)]
+  pub mac: Option<VersionDetect>,
+  #[serde(default)]
+  pub linux: Option<VersionDetect>,
+  #[serde(default)]
+  pub windows: Option<VersionDetect>,
+  #[serde(default)]
+  pub wsl: Option<VersionDetect>,
+  #[serde(default)]
+  pub other: Option<VersionDetect>,
 }
 
 impl VersionDetectSpec {
-  /// Pick the best rule for the given platform:
-  /// platform override -> all -> None
   pub fn for_platform(&self, p: Platform) -> Option<&VersionDetect> {
     match p {
       Platform::Mac => self.mac.as_ref().or(self.all.as_ref()),
@@ -409,10 +409,8 @@ pub enum VersionDetect {
     command: String,
     #[serde(default)]
     args: Vec<String>,
-
     #[serde(default)]
     regex: Option<String>,
-
     #[serde(default = "default_version_capture")]
     capture: String,
   },
