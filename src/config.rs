@@ -272,7 +272,7 @@ pub struct CloudModules {
   pub items: BTreeMap<String, CloudModule>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct CloudModule {
   pub enabled: bool,
 
@@ -296,7 +296,7 @@ pub enum CloudKind {
   Service,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct AppModules {
   #[serde(default = "default_true")]
   pub enabled: bool,
@@ -305,7 +305,7 @@ pub struct AppModules {
   pub items: BTreeMap<String, AppModule>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct AppModule {
   pub enabled: bool,
 
@@ -355,7 +355,7 @@ pub struct HookItem {
   pub script: String,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct DetectBlock {
   #[serde(default)]
   pub paths: PlatformAnyOf,
@@ -373,7 +373,7 @@ pub struct DetectBlock {
   pub version: Option<VersionDetectSpec>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct VersionDetectSpec {
   #[serde(default)]
@@ -402,7 +402,7 @@ impl VersionDetectSpec {
   }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum VersionDetect {
   Command {
@@ -425,7 +425,7 @@ fn default_version_capture() -> String {
   "version".to_string()
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct PlatformAnyOf {
   #[serde(default)]
   pub mac: AnyOf,
@@ -439,13 +439,13 @@ pub struct PlatformAnyOf {
   pub other: AnyOf,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct AnyOf {
   #[serde(default)]
   pub any_of: Vec<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct EmitBlock {
   #[serde(default)]
   pub env: EnvMap,
@@ -463,7 +463,7 @@ pub struct EmitBlock {
   pub paths: PathsEmit,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct PathsEmit {
   #[serde(default)]
   pub prepend_if_exists: Vec<String>,
@@ -472,7 +472,7 @@ pub struct PathsEmit {
   pub append_if_exists: Vec<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct FunctionsEmit {
   #[serde(default)]
   pub files: Vec<String>,
