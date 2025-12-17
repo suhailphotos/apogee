@@ -89,6 +89,14 @@ impl<'a> Resolver<'a> {
             ),
 
             // Prefer runtime env for xdg so .env can override, but fall back to ctx
+            "shell_ext" => Some(match self.ctx.shell_type {
+                Some(crate::config::Shell::Zsh) => "zsh",
+                Some(crate::config::Shell::Bash) => "bash",
+                Some(crate::config::Shell::Fish) => "fish",
+                Some(crate::config::Shell::Pwsh) => "ps1",
+                None => "sh", // reasonable fallback
+            }.to_string()),
+
             "xdg_config_home" => self
                 .env
                 .get("XDG_CONFIG_HOME")

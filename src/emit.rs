@@ -144,6 +144,33 @@ impl Emitter {
             }
         }
     }
+    pub fn source_if_exists(&self, out: &mut String, path: &str) {
+        let p = self.rewrite_value_for_shell(path);
+
+        match self.shell {
+            Shell::Zsh | Shell::Bash => {
+                out.push_str("if [ -r ");
+                out.push_str(&quote_posix(&p));
+                out.push_str(" ]; then source ");
+                out.push_str(&quote_posix(&p));
+                out.push_str("; fi\n");
+            }
+            Shell::Fish => {
+                out.push_str("if test -r ");
+                out.push_str(&quote_fish(&p));
+                out.push_str("; source ");
+                out.push_str(&quote_fish(&p));
+                out.push_str("; end\n");
+            }
+            Shell::Pwsh => {
+                out.push_str("if (Test-Path -Path ");
+                out.push_str(&quote_pwsh(&p));
+                out.push_str(" -PathType Leaf) { . ");
+                out.push_str(&quote_pwsh(&p));
+                out.push_str(" }\n");
+            }
+        }
+    }
 
     fn rewrite_value_for_shell(&self, s: &str) -> String {
         match self.shell {
