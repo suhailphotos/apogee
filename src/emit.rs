@@ -101,7 +101,7 @@ impl Emitter {
             Shell::Fish => {
                 out.push_str("if test -d ");
                 out.push_str(&quote_fish(&d));
-                out.push_str("; fish_add_path -g ");
+                out.push_str("; fish_add_path -g -a ");
                 out.push_str(&quote_fish(&d));
                 out.push_str("; end\n");
             }

@@ -5,6 +5,7 @@ use serde::Deserialize;
 use std::{
     collections::BTreeMap,
     fmt,
+    str::FromStr,
     path::{Path, PathBuf},
 };
 
@@ -160,6 +161,33 @@ pub enum Shell {
     Fish,
     Pwsh,
 }
+
+impl Shell {
+    /// Parse common shell strings (case-insensitive).
+    /// Accepts: zsh, bash, fish, pwsh, powershell.
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim();
+        if s.is_empty() {
+            return None;
+        }
+        let s = s.to_ascii_lowercase();
+        match s.as_str() {
+            "zsh" => Some(Shell::Zsh),
+            "bash" => Some(Shell::Bash),
+            "fish" => Some(Shell::Fish),
+            "pwsh" | "powershell" => Some(Shell::Pwsh),
+            _ => None,
+        }
+    }
+}
+
+impl FromStr for Shell {
+    type Err = String;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("invalid shell: {s}"))
+    }
+}
+
 
 impl fmt::Display for Shell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

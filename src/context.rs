@@ -53,7 +53,13 @@ impl ContextEnv {
         );
 
         let platform = detect_platform(&vars);
-        let shell_type = detect_shell(&vars);
+        // Shell precedence:
+        // 1) APOGEE_SHELL (explicit override)
+        // 2) best-effort detection
+        let shell_type = vars
+            .get("APOGEE_SHELL")
+            .and_then(|s| Shell::parse(s))
+            .or_else(|| detect_shell(&vars));
         let host = detect_hostname(&vars).unwrap_or_else(|| "unknown".to_string());
 
         // Helpful computed vars (small + harmless)
@@ -62,6 +68,7 @@ impl ContextEnv {
             platform_to_str(platform).to_string(),
         );
         if let Some(sh) = shell_type {
+            // Keep APOGEE_SHELL normalized (so downstream token resolution is consistent)
             vars.insert("APOGEE_SHELL".to_string(), shell_to_str(sh).to_string());
         }
         vars.insert("APOGEE_HOST".to_string(), host.clone());
@@ -222,6 +229,16 @@ fn detect_shell(vars: &BTreeMap<String, String>) -> Option<Shell> {
     // Prefer pwsh signal first (important on mac/linux where SHELL may still be zsh)
     if vars.contains_key("PSModulePath") || vars.contains_key("POWERSHELL_DISTRIBUTION_CHANNEL") {
         return Some(Shell::Pwsh);
+    }
+    // Some shells export a version var (not guaranteed, but cheap)
+    if vars.contains_key("ZSH_VERSION") {
+        return Some(Shell::Zsh);
+    }
+    if vars.contains_key("BASH_VERSION") {
+        return Some(Shell::Bash);
+    }
+    if vars.contains_key("FISH_VERSION") {
+        return Some(Shell::Fish);
     }
 
     if let Some(sh) = vars.get("SHELL") {

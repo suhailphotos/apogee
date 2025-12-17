@@ -1,4 +1,4 @@
-use anyhow::{Context as _, Result};
+use anyhow::{bail, Context as _, Result};
 use regex::Regex;
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -149,6 +149,11 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
 
             let cmd = r.resolve(command)
                 .with_context(|| format!("failed to resolve version command: {command}"))?;
+
+            // Config correctness: command must be an executable path/name, args carry flags.
+            if cmd.split_whitespace().count() > 1 {
+                bail!("version command must not contain whitespace; use args for flags: {cmd}");
+            }
 
             let mut resolved_args = Vec::with_capacity(args.len());
             for a in args {
@@ -393,14 +398,18 @@ fn command_exists(platform: Platform, vars: &BTreeMap<String, String>, cmd: &str
         let base = Path::new(dir);
 
         if matches!(platform, Platform::Windows) {
+            // Respect PATHEXT if present.
+            let exts = pathext_list(vars);
+
             // If user already provided an extension, try it as-is first.
             if cmd.contains('.') {
                 if base.join(cmd).exists() {
                     return true;
                 }
             } else {
-                for ext in ["exe", "cmd", "bat", "com"] {
-                    if base.join(format!("{cmd}.{ext}")).exists() {
+                for ext in exts.iter() {
+                    // ext comes with leading dot (".exe")
+                    if base.join(format!("{cmd}{ext}")).exists() {
                         return true;
                     }
                 }
@@ -413,6 +422,34 @@ fn command_exists(platform: Platform, vars: &BTreeMap<String, String>, cmd: &str
     }
 
     false
+}
+
+
+fn pathext_list(vars: &BTreeMap<String, String>) -> Vec<String> {
+    // Prefer PATHEXT, else common defaults.
+    let raw = vars
+        .get("PATHEXT")
+        .map(|s| s.as_str())
+        .unwrap_or(".COM;.EXE;.BAT;.CMD");
+
+    let mut out = Vec::new();
+    for part in raw.split(';') {
+        let p = part.trim();
+        if p.is_empty() {
+            continue;
+        }
+        let mut p = p.to_string();
+        if !p.starts_with('.') {
+            p.insert(0, '.');
+        }
+        out.push(p.to_ascii_lowercase());
+    }
+
+    if out.is_empty() {
+        out = vec![".com", ".exe", ".bat", ".cmd"].into_iter().map(|s| s.to_string()).collect();
+    }
+
+    out
 }
 
 // ---------------- ordering (same idea as cloud) ----------------
