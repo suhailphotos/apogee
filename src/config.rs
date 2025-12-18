@@ -92,6 +92,12 @@ impl fmt::Display for Config {
     }
 }
 
+#[derive(Debug, Default, Deserialize, Clone)]
+pub struct SourceEmit {
+    #[serde(default)]
+    pub files: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ApogeeMeta {
     pub schema_version: u32,
@@ -494,6 +500,9 @@ pub struct EmitBlock {
 
     #[serde(default)]
     pub aliases: AliasMap,
+
+    #[serde(default)]
+    pub source: SourceEmit,
 
     #[serde(default)]
     pub functions: FunctionsEmit,

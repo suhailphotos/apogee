@@ -324,6 +324,19 @@ fn emit_app_module_into(
         }
     }
 
+    // Source vendor scripts (completions, keybindings, etc.)
+    if !emit.source.files.is_empty() {
+        em.blank(out);
+
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        for raw in emit.source.files.iter() {
+            let p = r.resolve(raw)?;
+            if seen.insert(p.clone()) {
+                em.source_if_exists(out, &p);
+            }
+        }
+    }
+
     // Aliases
     if !emit.aliases.is_empty() {
         em.blank(out);
