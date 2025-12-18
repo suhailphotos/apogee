@@ -489,6 +489,9 @@ pub struct EmitBlock {
 
     #[serde(default)]
     pub paths: PathsEmit,
+
+    #[serde(default)]
+    pub init: Vec<EmitInit>,
 }
 
 #[derive(Debug, Default, Deserialize, Clone)]
@@ -505,3 +508,18 @@ pub struct FunctionsEmit {
     #[serde(default)]
     pub files: Vec<String>,
 }
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct EmitInit {
+    pub command: String,
+
+    #[serde(default)]
+    pub args: Vec<String>,
+
+    // PowerShell quirk:
+    // zoxide docs use: Invoke-Expression (& { (zoxide init powershell | Out-String) })
+    // starship docs use: Invoke-Expression (&starship init powershell)
+    #[serde(default)]
+    pub pwsh_out_string: bool,
+}
+

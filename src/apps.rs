@@ -1,4 +1,4 @@
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result};
 use regex::Regex;
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -72,8 +72,13 @@ fn detect_one_app(ctx: &ContextEnv, rt: &RuntimeEnv, name: &str, m: &AppModule) 
             .resolve(raw)
             .with_context(|| format!("apps.{name}: failed to resolve detect command: {raw}"))?;
 
-        if command_exists(ctx.platform, &rt.vars, &cmd) {
-            detect.insert("command".to_string(), cmd);
+        if let Some(found) = resolve_command(ctx.platform, &rt.vars, &cmd) {
+            let dir = found.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+
+            detect.insert("command".to_string(), cmd.clone());
+            detect.insert("command_path".to_string(), found.to_string_lossy().to_string());
+            detect.insert("command_dir".to_string(), dir);
+
             attach_version_if_any(ctx, rt, m.detect.version.as_ref(), &mut detect)?;
             return Ok(Some(DetectedApp {
                 name: name.to_string(),
@@ -147,13 +152,11 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
         VersionDetect::Command { command, args, regex, capture } => {
             let r = Resolver::new(ctx, &rt.vars).with_detect(detect);
 
-            let cmd = r.resolve(command)
-                .with_context(|| format!("failed to resolve version command: {command}"))?;
-
-            // Config correctness: command must be an executable path/name, args carry flags.
-            if cmd.split_whitespace().count() > 1 {
-                bail!("version command must not contain whitespace; use args for flags: {cmd}");
-            }
+            let cmd = if let Some(p) = detect.get("command_path") {
+                p.clone()
+            } else {
+                r.resolve(command)?
+            };
 
             let mut resolved_args = Vec::with_capacity(args.len());
             for a in args {
@@ -226,7 +229,7 @@ pub fn emit_apps(ctx: &ContextEnv, rt: &RuntimeEnv, cfg: &Config, shell: Shell) 
         return Ok(String::new());
     }
 
-    let em = Emitter::new(shell, ctx.platform);
+    let em = Emitter::new(shell);
 
     let mut out = String::new();
     em.header(&mut out, "apogee (apps)");
@@ -267,9 +270,14 @@ fn emit_app_module_into(
     // Functions (source external scripts)
     if !emit.functions.files.is_empty() {
         em.blank(out);
+
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+
         for raw in emit.functions.files.iter() {
             let p = r.resolve(raw)?;
-            em.source_if_exists(out, &p);
+            if seen.insert(p.clone()) {
+                em.source_if_exists(out, &p);
+            }
         }
     }
 
@@ -279,6 +287,21 @@ fn emit_app_module_into(
         for (name, raw) in emit.aliases.iter() {
             let val = r.resolve(raw)?;
             em.alias(out, name, &val);
+        }
+    }
+
+    // Init commands (evaluate tool-provided shell code, e.g. starship/zoxide)
+    if !emit.init.is_empty() {
+        em.blank(out);
+
+        for init in emit.init.iter() {
+            let cmd = r.resolve(&init.command)?;
+            let mut args = Vec::with_capacity(init.args.len());
+            for a in init.args.iter() {
+                args.push(r.resolve(a)?);
+            }
+
+            em.init_eval_if_exists(out, &cmd, &args, init.pwsh_out_string);
         }
     }
 
@@ -376,12 +399,29 @@ fn first_present_env(vars: &BTreeMap<String, String>, keys: &[String]) -> Option
     None
 }
 
-fn command_exists(platform: Platform, vars: &BTreeMap<String, String>, cmd: &str) -> bool {
-    // If it contains a path separator, treat as a path.
+fn resolve_command(platform: Platform, vars: &BTreeMap<String, String>, cmd: &str) -> Option<PathBuf> {
+    // If it contains a path separator, treat as an explicit path.
     if cmd.contains('/') || cmd.contains('\\') {
-        return Path::new(cmd).exists();
+        let p = PathBuf::from(cmd);
+        return p.is_file().then_some(p);
     }
 
+    // 1) Try PATH first (if any)
+    if let Some(p) = resolve_on_path(platform, vars, cmd) {
+        return Some(p);
+    }
+
+    // 2) Fallback: scan standard locations
+    for dir in fallback_command_dirs(platform, vars) {
+        if let Some(p) = resolve_in_dir(platform, vars, &dir, cmd) {
+            return Some(p);
+        }
+    }
+
+    None
+}
+
+fn resolve_on_path(platform: Platform, vars: &BTreeMap<String, String>, cmd: &str) -> Option<PathBuf> {
     let path_key = if matches!(platform, Platform::Windows) { "Path" } else { "PATH" };
     let path_val = vars.get(path_key)
         .or_else(|| vars.get("PATH"))
@@ -390,40 +430,139 @@ fn command_exists(platform: Platform, vars: &BTreeMap<String, String>, cmd: &str
         .unwrap_or("");
 
     if path_val.trim().is_empty() {
-        return false;
+        return None;
     }
 
     let sep = if matches!(platform, Platform::Windows) { ';' } else { ':' };
     for dir in path_val.split(sep).map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        let base = Path::new(dir);
+        let base = PathBuf::from(dir);
+        if let Some(p) = resolve_in_dir(platform, vars, &base, cmd) {
+            return Some(p);
+        }
+    }
 
-        if matches!(platform, Platform::Windows) {
-            // Respect PATHEXT if present.
-            let exts = pathext_list(vars);
+    None
+}
 
-            // If user already provided an extension, try it as-is first.
-            if cmd.contains('.') {
-                if base.join(cmd).exists() {
-                    return true;
-                }
-            } else {
-                for ext in exts.iter() {
-                    // ext comes with leading dot (".exe")
-                    if base.join(format!("{cmd}{ext}")).exists() {
-                        return true;
-                    }
+fn resolve_in_dir(platform: Platform, vars: &BTreeMap<String, String>, dir: &Path, cmd: &str) -> Option<PathBuf> {
+    if !dir.is_dir() {
+        return None;
+    }
+
+    if matches!(platform, Platform::Windows) {
+        let exts = pathext_list(vars);
+
+        // If user already provided an extension, try it as-is first.
+        if cmd.contains('.') {
+            let p = dir.join(cmd);
+            return p.is_file().then_some(p);
+        }
+
+        for ext in exts {
+            let p = dir.join(format!("{cmd}{ext}"));
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+        None
+    } else {
+        let p = dir.join(cmd);
+        p.is_file().then_some(p)
+    }
+}
+
+fn fallback_command_dirs(platform: Platform, vars: &BTreeMap<String, String>) -> Vec<PathBuf> {
+    fn push(out: &mut Vec<PathBuf>, p: &str) {
+        if !p.is_empty() {
+            out.push(PathBuf::from(p));
+        }
+    }
+
+    fn push_home(out: &mut Vec<PathBuf>, home: &str, suffix: &str) {
+        if !home.is_empty() {
+            out.push(PathBuf::from(home).join(suffix));
+        }
+    }
+
+    let mut out: Vec<PathBuf> = Vec::new();
+
+    let home = vars
+        .get("HOME")
+        .cloned()
+        .or_else(|| vars.get("USERPROFILE").cloned())
+        .unwrap_or_else(String::new);
+
+    match platform {
+        Platform::Mac => {
+            push(&mut out, "/opt/homebrew/bin");
+            push(&mut out, "/usr/local/bin");
+            push(&mut out, "/usr/bin");
+            push(&mut out, "/bin");
+            push(&mut out, "/usr/sbin");
+            push(&mut out, "/sbin");
+
+            push_home(&mut out, &home, ".local/bin");
+            push_home(&mut out, &home, ".cargo/bin");
+        }
+        Platform::Linux | Platform::Other => {
+            push(&mut out, "/usr/local/sbin");
+            push(&mut out, "/usr/local/bin");
+            push(&mut out, "/usr/sbin");
+            push(&mut out, "/usr/bin");
+            push(&mut out, "/sbin");
+            push(&mut out, "/bin");
+
+            push_home(&mut out, &home, ".local/bin");
+            push_home(&mut out, &home, ".cargo/bin");
+        }
+        Platform::Wsl => {
+            push(&mut out, "/usr/local/sbin");
+            push(&mut out, "/usr/local/bin");
+            push(&mut out, "/usr/sbin");
+            push(&mut out, "/usr/bin");
+            push(&mut out, "/sbin");
+            push(&mut out, "/bin");
+
+            push_home(&mut out, &home, ".local/bin");
+            push_home(&mut out, &home, ".cargo/bin");
+
+            if let Some(user) = vars.get("USERNAME").or_else(|| vars.get("USER")).cloned() {
+                if !user.trim().is_empty() {
+                    out.push(PathBuf::from(format!("/mnt/c/Users/{user}/.cargo/bin")));
+                    out.push(PathBuf::from(format!("/mnt/c/Users/{user}/scoop/shims")));
                 }
             }
-        } else {
-            if base.join(cmd).exists() {
-                return true;
+        }
+        Platform::Windows => {
+            push(&mut out, r"C:\Windows\System32");
+            push(&mut out, r"C:\Windows");
+
+            if !home.is_empty() {
+                out.push(PathBuf::from(&home).join(".cargo").join("bin"));
+                out.push(PathBuf::from(&home).join("scoop").join("shims"));
+                out.push(
+                    PathBuf::from(&home)
+                        .join("AppData")
+                        .join("Local")
+                        .join("Microsoft")
+                        .join("WindowsApps"),
+                );
+            }
+
+            if let Some(pf) = vars.get("ProgramFiles").cloned() {
+                if !pf.trim().is_empty() {
+                    out.push(PathBuf::from(pf).join("Git").join("cmd"));
+                }
             }
         }
     }
 
-    false
+    // De-dupe while preserving order
+    let mut seen = BTreeSet::new();
+    out.into_iter()
+        .filter(|p| seen.insert(p.to_string_lossy().to_string()))
+        .collect()
 }
-
 
 fn pathext_list(vars: &BTreeMap<String, String>) -> Vec<String> {
     // Prefer PATHEXT, else common defaults.

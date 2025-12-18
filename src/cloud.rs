@@ -186,7 +186,7 @@ pub fn emit_cloud(ctx: &ContextEnv, rt: &RuntimeEnv, cfg: &Config, shell: Shell)
         return Ok(String::new());
     }
 
-    let em = Emitter::new(shell, ctx.platform);
+    let em = Emitter::new(shell);
 
     // one buffer, written into (no per-module String allocations)
     let mut out = String::new();

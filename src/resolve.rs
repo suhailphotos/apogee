@@ -64,6 +64,25 @@ impl<'a> Resolver<'a> {
                     continue;
                 }
 
+                // IMPORTANT: treat ${VAR} as literal shell syntax (do not token-expand)
+                if i > 0 && bytes[i - 1] == b'$' {
+                    // copy through the matching }
+                    let start = i; // at '{'
+                    let mut end = i + 1;
+                    while end < bytes.len() && bytes[end] != b'}' {
+                        end += 1;
+                    }
+                    if end < bytes.len() && bytes[end] == b'}' {
+                        out.push_str(&input[start..=end]); // includes { ... }
+                        i = end + 1;
+                        continue;
+                    }
+                    // If it's "${" but unclosed, just treat "{" literally.
+                    out.push('{');
+                    i += 1;
+                    continue;
+                }
+
                 // Token start: find closing "}"
                 let start = i + 1;
                 let mut end = start;
@@ -145,6 +164,15 @@ impl<'a> Resolver<'a> {
                 .get("XDG_CONFIG_HOME")
                 .cloned()
                 .or_else(|| Some(self.ctx.xdg_config_home.to_string_lossy().to_string())),
+            // init-arg for tools that want shell name (starship, zoxide, etc)
+            // zsh|bash|fish|powershell
+            "shell_init" => Some(match eff_shell {
+                Some(Shell::Zsh) => "zsh".to_string(),
+                Some(Shell::Bash) => "bash".to_string(),
+                Some(Shell::Fish) => "fish".to_string(),
+                Some(Shell::Pwsh) => "powershell".to_string(),
+                None => "sh".to_string(),
+            }),
             "xdg_cache_home" => self
                 .env
                 .get("XDG_CACHE_HOME")
