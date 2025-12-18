@@ -224,8 +224,7 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
 // --------------------- EMIT (apps only) ---------------------
 
 pub fn emit_apps(ctx: &ContextEnv, rt: &RuntimeEnv, cfg: &Config, shell: Shell) -> Result<String> {
-    let detected = detect_app_modules(ctx, rt, cfg)?;
-    if detected.is_empty() {
+    if !cfg.modules.enable_apps || !cfg.modules.apps.enabled {
         return Ok(String::new());
     }
 
@@ -234,10 +233,40 @@ pub fn emit_apps(ctx: &ContextEnv, rt: &RuntimeEnv, cfg: &Config, shell: Shell) 
     let mut out = String::new();
     em.header(&mut out, "apogee (apps)");
 
-    for d in detected {
-        em.comment(&mut out, &format!("--- app: {} ---", d.name));
-        emit_app_module_into(&em, &mut out, ctx, rt, &d.detect, &d.module.emit)?;
-        em.blank(&mut out);
+    // IMPORTANT: sequential pass with a mutable env map.
+    // This ensures PATH updates from earlier modules affect later detect.commands.
+    let mut work = rt.clone();
+
+    // Deterministic order: priority, then name.
+    let mut items: Vec<(&String, &AppModule)> = cfg.modules.apps.items.iter().collect();
+    items.sort_by(|(an, am), (bn, bm)| am.priority.cmp(&bm.priority).then_with(|| an.cmp(bn)));
+
+    let mut emitted_any = false;
+
+    for (name, m) in items {
+        if !m.enabled {
+            continue;
+        }
+        if !module_supports_platform(m, ctx.platform) {
+            continue;
+        }
+
+        // Detect using the *current* work.vars (which may already include earlier PATH/env).
+        if let Some(det) = detect_one_app(ctx, &work, name, m)? {
+            emitted_any = true;
+            em.comment(&mut out, &format!("--- app: {} ---", det.name));
+            emit_app_module_into(&em, &mut out, ctx, &work, &det.detect, &det.module.emit)?;
+
+            // Mutate work.vars to reflect what we just emitted (env + PATH)
+            // so the next module can detect against it.
+            apply_emit_effects_to_runtime(ctx, &mut work, &det.detect, &det.module.emit)?;
+            em.blank(&mut out);
+        }
+    }
+
+    if !emitted_any {
+        // keep output clean; if nothing active, return empty (no header)
+        return Ok(String::new());
     }
 
     Ok(out)
@@ -266,6 +295,20 @@ fn emit_app_module_into(
     for (k, v) in order_env_assignments(&assigns) {
         em.set_env(out, &k, &v);
     }
+
+    // PATH mods (emit earlier so functions/init see tools on PATH)
+    if !emit.paths.prepend_if_exists.is_empty() || !emit.paths.append_if_exists.is_empty() {
+        em.blank(out);
+        for p in emit.paths.prepend_if_exists.iter() {
+            let s = r.resolve(p)?;
+            em.path_prepend_if_exists(out, &s);
+        }
+        for p in emit.paths.append_if_exists.iter() {
+            let s = r.resolve(p)?;
+            em.path_append_if_exists(out, &s);
+        }
+    }
+
 
     // Functions (source external scripts)
     if !emit.functions.files.is_empty() {
@@ -304,22 +347,85 @@ fn emit_app_module_into(
             em.init_eval_if_exists(out, &cmd, &args, init.pwsh_out_string);
         }
     }
+    Ok(())
+}
 
-    // PATH mods (runtime checks, not Rust-side expansion)
-    if !emit.paths.prepend_if_exists.is_empty() || !emit.paths.append_if_exists.is_empty() {
-        em.blank(out);
-        for p in emit.paths.prepend_if_exists.iter() {
-            let s = r.resolve(p)?;
-            em.path_prepend_if_exists(out, &s);
+fn apply_emit_effects_to_runtime(
+    ctx: &ContextEnv,
+    rt: &mut RuntimeEnv,
+    detect: &DetectVars,
+    emit: &EmitBlock,
+) -> Result<()> {
+    // -------- 1) ENV: resolve using a snapshot, then apply into rt.vars --------
+    let snap1 = rt.vars.clone();
+    let r1 = Resolver::new(ctx, &snap1).with_detect(detect);
+
+    let mut assigns: BTreeMap<String, String> = BTreeMap::new();
+    for (k, v) in emit.env.iter() {
+        assigns.insert(k.clone(), r1.resolve(v)?);
+    }
+    for (k, v) in emit.env_derived.iter() {
+        assigns.insert(k.clone(), r1.resolve(v)?);
+    }
+
+    for (k, v) in order_env_assignments(&assigns) {
+        rt.vars.insert(k, v);
+    }
+
+    // -------- 2) PATH: resolve using a new snapshot (now includes env above) ---
+    let snap2 = rt.vars.clone();
+    let r2 = Resolver::new(ctx, &snap2).with_detect(detect);
+
+    let sep = if matches!(ctx.platform, Platform::Windows) { ';' } else { ':' };
+    let path_key_primary = if matches!(ctx.platform, Platform::Windows) { "Path" } else { "PATH" };
+
+    let mut path_val = snap2
+        .get(path_key_primary)
+        .cloned()
+        .or_else(|| snap2.get("PATH").cloned())
+        .or_else(|| snap2.get("Path").cloned())
+        .unwrap_or_default();
+
+    let mut parts: Vec<String> = path_val
+        .split(sep)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    let mut have: BTreeSet<String> = parts.iter().cloned().collect();
+
+    // prepend
+    for raw in emit.paths.prepend_if_exists.iter() {
+        let d = r2.resolve(raw)?;
+        if d.is_empty() || !Path::new(&d).is_dir() {
+            continue;
         }
-        for p in emit.paths.append_if_exists.iter() {
-            let s = r.resolve(p)?;
-            em.path_append_if_exists(out, &s);
+        if have.insert(d.clone()) {
+            parts.insert(0, d);
         }
     }
 
+    // append
+    for raw in emit.paths.append_if_exists.iter() {
+        let d = r2.resolve(raw)?;
+        if d.is_empty() || !Path::new(&d).is_dir() {
+            continue;
+        }
+        if have.insert(d.clone()) {
+            parts.push(d);
+        }
+    }
+
+    path_val = parts.join(&sep.to_string());
+
+    // keep both keys in sync (your existing behavior)
+    rt.vars.insert("PATH".to_string(), path_val.clone());
+    rt.vars.insert("Path".to_string(), path_val);
+
     Ok(())
 }
+
 
 // --------------------- helpers ---------------------
 

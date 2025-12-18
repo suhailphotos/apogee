@@ -9,6 +9,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+fn default_priority() -> i32 {
+    1000
+}
+
 pub fn default_config_path() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
@@ -307,6 +311,10 @@ pub struct CloudModule {
     #[serde(default)]
     pub kind: Option<CloudKind>,
 
+    #[serde(default = "default_priority")]
+    pub priority: i32,
+
+
     #[serde(default)]
     pub platforms: Vec<Platform>,
 
@@ -339,6 +347,9 @@ pub struct AppModule {
 
     #[serde(default)]
     pub kind: Option<AppKind>,
+
+    #[serde(default = "default_priority")]
+    pub priority: i32,
 
     #[serde(default)]
     pub platforms: Vec<Platform>,
