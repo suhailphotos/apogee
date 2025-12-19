@@ -1,50 +1,185 @@
 # apogee
 
-**apogee** — Orbit’s companion that **emits cross‑shell config** (aliases, PATH, env, functions) from smart system detection, so your shell needs just a **single `eval`**.
+**apogee** emits cross-shell shell initialization (env vars, PATH edits, aliases, functions, and templates) from a single TOML config and runtime detection.
 
-> status: pre‑alpha (scaffolding)
+- Config: `~/.config/apogee/config.toml`
+- Typical usage: load once per shell session, then use the emitted functions/aliases.
 
-## quick start (planned)
+> Status: pre-alpha. Expect breaking changes.
+
+---
+
+## Install (dev)
+
+### Keep the binary in `~/.cargo/bin` (recommended)
+From the repo root:
 
 ```sh
-# zsh/bash
+cargo install --path .
+```
+
+Ensure `~/.cargo/bin` is on your PATH:
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+Verify:
+
+```sh
+type -a apogee
+```
+
+### Run without installing (dev)
+```sh
+cargo run --quiet
+```
+
+---
+
+## Quick start
+
+### zsh / bash
+```sh
 eval "$(apogee)"
 ```
 
+### fish
+```fish
+apogee | source
+```
+
+### PowerShell
 ```powershell
-# PowerShell
-&{ $out = apogee; Invoke-Expression $out }
+. ([ScriptBlock]::Create((& apogee | Out-String)))
 ```
 
-The current binary prints a safe placeholder so eval won’t break while you iterate.
+---
 
-## goals
+## Testing in a clean environment (recommended)
 
-- one binary → consistent output for zsh, bash, and PowerShell (fish later)
-- capability detection (apps, paths, Houdini flags, etc.)
-- idempotent, conditional emissions
-- zero‑config bootstrap: single eval line in `~/.zshrc`, `~/.bashrc`, or `$PROFILE`
-- snapshot tests for emitted scripts
+These commands launch each shell with a minimal environment so you can validate Apogee emissions without your normal dotfiles interfering.
 
-## roadmap (sketch)
+> Note: `TERM` is intentionally provided here so `clear` works in the clean shell.
+> In your final setup, terminal defaults should come from your terminal/rc files, not from apogee.
 
-- [ ] detect: PATH sources, tool presence (houdini, python, etc.)
-- [ ] emit: shell‑specific code generation (zsh/bash/pwsh; fish later)
-- [ ] profiles: minimal, verbose, debug modes
-- [ ] tests: golden snapshots for emitted scripts
-- [ ] releases: cross‑platform artifacts
-
-## dev setup
-
+### zsh (clean)
 ```sh
-# from repo root
-cargo run --quiet
-# or
-cargo build
+env -i   HOME="$HOME" USER="$USER" LOGNAME="$USER"   TERM="${TERM:-xterm-256color}" COLORTERM="${COLORTERM:-truecolor}"   LANG="${LANG:-en_US.UTF-8}"   PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"   XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache" XDG_DATA_HOME="$HOME/.local/share"   APOGEE_SHELL=zsh   zsh -f
 ```
 
-The scaffolded `main.rs` prints a harmless placeholder and a sample alias.
+Inside the shell:
+```sh
+eval "$(apogee)"
+```
 
-## license
+### bash (clean)
+```sh
+env -i HOME="$HOME" USER="$USER" LOGNAME="$USER"   TERM="${TERM:-xterm-256color}" LANG="${LANG:-en_US.UTF-8}"   PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"   XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"   APOGEE_SHELL=bash   bash --noprofile --norc
+```
+
+Inside the shell:
+```sh
+eval "$(apogee)"
+```
+
+### fish (clean)
+```sh
+env -i HOME="$HOME" USER="$USER" LOGNAME="$USER"   TERM="${TERM:-xterm-256color}" LANG="${LANG:-en_US.UTF-8}"   PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"   XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"   APOGEE_SHELL=fish   fish --no-config
+```
+
+Inside fish:
+```fish
+apogee | source
+```
+
+### PowerShell (clean)
+```sh
+PWSH_BIN="$(command -v pwsh || command -v powershell)"
+
+env -i HOME="$HOME" USER="$USER" LOGNAME="$USER"   TERM="${TERM:-xterm-256color}" LANG="${LANG:-en_US.UTF-8}"   PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"   XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"   APOGEE_SHELL=pwsh   "$PWSH_BIN" -NoProfile
+```
+
+Inside PowerShell:
+```powershell
+. ([ScriptBlock]::Create((& apogee | Out-String)))
+```
+
+---
+
+## Quick smoke checks (after loading)
+
+These help confirm apogee actually loaded.
+
+### zsh / bash
+```sh
+type pkg
+type python_projects
+echo "$PACKAGES"
+```
+
+### fish
+```fish
+functions -q pkg; and echo "pkg ok"
+functions -q python_projects; and python_projects
+echo $PACKAGES
+```
+
+### PowerShell
+```powershell
+Get-Command pkg -ErrorAction SilentlyContinue
+Get-Command python_projects -ErrorAction SilentlyContinue
+$env:PACKAGES
+```
+
+---
+
+## Avoiding command shadowing during testing
+
+Because apogee may emit an alias/function named `apogee` (for `cd`), you may accidentally shadow the binary.
+
+When you want to be certain you’re running the installed binary:
+
+### zsh / bash
+```sh
+command apogee
+```
+
+### fish
+```fish
+command apogee | head -n 5
+```
+
+### PowerShell
+```powershell
+& (Get-Command apogee -CommandType Application).Source | Out-String
+```
+
+If in doubt, call it explicitly:
+- mac/linux: `$HOME/.cargo/bin/apogee`
+
+---
+
+## Developer workflow
+
+### Format + check
+```sh
+cargo fmt
+cargo clippy
+cargo test
+```
+
+### Print output for a specific shell
+```sh
+APOGEE_SHELL=zsh  apogee | sed -n '1,200p'
+APOGEE_SHELL=bash apogee | sed -n '1,200p'
+APOGEE_SHELL=fish apogee | sed -n '1,200p'
+APOGEE_SHELL=pwsh apogee | sed -n '1,200p'
+```
+
+---
+
+## License
 
 MIT
+
