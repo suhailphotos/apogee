@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use serde::Deserialize;
+use serde_json::Value as JsonValue;
 use std::{
     collections::BTreeMap,
     fmt,
@@ -64,30 +65,37 @@ impl fmt::Display for Config {
         };
 
         let knobs = format!(
-            "cloud={} apps={} hooks={}",
-            self.modules.enable_cloud, self.modules.enable_apps, self.modules.enable_hooks
+            "cloud={} apps={} hooks={} templates={}",
+            self.modules.enable_cloud,
+            self.modules.enable_apps,
+            self.modules.enable_hooks,
+            self.modules.enable_templates
         );
 
         let cloud_items = self.modules.cloud.items.len();
         let apps_items = self.modules.apps.items.len();
         let hooks_items = self.modules.hooks.items.len();
+        let templates_items = self.modules.templates.items.len();
 
         write!(
             f,
             "apogee config\n\
-       - schema_version: {schema}\n\
-       - default_shell: {default_shell}\n\
-       - platforms: {platforms}\n\
-       - modules: {knobs}\n\
-       - cloud: enabled={} items={}\n\
-       - apps: enabled={} items={}\n\
-       - hooks: enabled={} items={}",
+               - schema_version: {schema}\n\
+               - default_shell: {default_shell}\n\
+               - platforms: {platforms}\n\
+               - modules: {knobs}\n\
+               - cloud: enabled={} items={}\n\
+               - apps: enabled={} items={}\n\
+               - hooks: enabled={} items={}\n\
+               - templates: enabled={} items={}",
             self.modules.cloud.enabled,
             cloud_items,
             self.modules.apps.enabled,
             apps_items,
             self.modules.hooks.enabled,
-            hooks_items
+            hooks_items,
+            self.modules.templates.enabled,
+            templates_items,
         )
     }
 }
@@ -236,12 +244,18 @@ impl fmt::Display for Platform {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ModulesRoot {
+
     #[serde(default = "default_true")]
     pub enable_cloud: bool,
+
     #[serde(default = "default_true")]
     pub enable_apps: bool,
+
     #[serde(default = "default_true")]
     pub enable_hooks: bool,
+
+    #[serde(default = "default_true")]
+    pub enable_templates: bool,
 
     #[serde(default)]
     pub cloud: CloudModules,
@@ -251,6 +265,9 @@ pub struct ModulesRoot {
 
     #[serde(default)]
     pub hooks: HooksModules,
+
+    #[serde(default)]
+    pub templates: TemplateModules,
 }
 
 fn default_true() -> bool {
@@ -320,6 +337,8 @@ pub struct CloudModule {
     #[serde(default = "default_priority")]
     pub priority: i32,
 
+    #[serde(default)]
+    pub requires: Vec<String>,
 
     #[serde(default)]
     pub platforms: Vec<Platform>,
@@ -356,6 +375,9 @@ pub struct AppModule {
 
     #[serde(default = "default_priority")]
     pub priority: i32,
+
+    #[serde(default)]
+    pub requires: Vec<String>,
 
     #[serde(default)]
     pub platforms: Vec<Platform>,
@@ -543,3 +565,64 @@ pub struct EmitInit {
     pub pwsh_out_string: bool,
 }
 
+
+// ---------------- Templates Modules ----------------
+
+#[derive(Debug, Default, Deserialize, Clone)]
+pub struct TemplateModules {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    #[serde(flatten, default)]
+    pub items: BTreeMap<String, TemplateModule>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct TemplateModule {
+    pub enabled: bool,
+
+    #[serde(default = "default_priority")]
+    pub priority: i32,
+
+    #[serde(default)]
+    pub requires: Vec<String>,
+
+    #[serde(default)]
+    pub platforms: Vec<Platform>,
+
+    /// Per-shell template file paths (user provides). `all` is a fallback.
+    #[serde(default)]
+    pub templates: TemplateFiles,
+
+    /// Arbitrary data passed to the template.
+    /// Use TOML tables/arrays; deserializes into a JSON-like value.
+    #[serde(default)]
+    pub data: JsonValue,
+}
+
+#[derive(Debug, Default, Deserialize, Clone)]
+pub struct TemplateFiles {
+    #[serde(default)]
+    pub all: Option<String>,
+
+    #[serde(default)]
+    pub zsh: Option<String>,
+    #[serde(default)]
+    pub bash: Option<String>,
+    #[serde(default)]
+    pub fish: Option<String>,
+    #[serde(default)]
+    pub pwsh: Option<String>,
+}
+
+impl TemplateFiles {
+    pub fn for_shell(&self, shell: Shell) -> Option<&str> {
+        let s = match shell {
+            Shell::Zsh => self.zsh.as_deref(),
+            Shell::Bash => self.bash.as_deref(),
+            Shell::Fish => self.fish.as_deref(),
+            Shell::Pwsh => self.pwsh.as_deref(),
+        };
+        s.or(self.all.as_deref())
+    }
+}

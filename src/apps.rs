@@ -15,6 +15,8 @@ use crate::{
     runtime::RuntimeEnv,
 };
 
+use crate::deps::{module_key, normalize_requires_list, requires_satisfied, topo_sort_group, DepNode};
+
 #[derive(Debug, Clone)]
 pub struct DetectedApp {
     pub name: String,
@@ -224,26 +226,39 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
 // --------------------- EMIT (apps only) ---------------------
 
 pub fn emit_apps(ctx: &ContextEnv, rt: &RuntimeEnv, cfg: &Config, shell: Shell) -> Result<String> {
+    let mut active = BTreeSet::new();
+    emit_apps_with_active(ctx, rt, cfg, shell, &mut active)
+}
+
+pub fn emit_apps_with_active(
+    ctx: &ContextEnv,
+    rt: &RuntimeEnv,
+    cfg: &Config,
+    shell: Shell,
+    active: &mut BTreeSet<String>,
+) -> Result<String> {
+    let mut work = rt.clone();
+    emit_apps_seq(ctx, &mut work, cfg, shell, active)
+}
+
+pub fn emit_apps_seq(
+    ctx: &ContextEnv,
+    rt: &mut RuntimeEnv,
+    cfg: &Config,
+    shell: Shell,
+    active: &mut BTreeSet<String>,
+) -> Result<String> {
     if !cfg.modules.enable_apps || !cfg.modules.apps.enabled {
         return Ok(String::new());
     }
 
     let em = Emitter::new(shell);
-
     let mut out = String::new();
     em.header(&mut out, "apogee (apps)");
 
-    // IMPORTANT: sequential pass with a mutable env map.
-    // This ensures PATH updates from earlier modules affect later detect.commands.
-    let mut work = rt.clone();
-
-    // Deterministic order: priority, then name.
-    let mut items: Vec<(&String, &AppModule)> = cfg.modules.apps.items.iter().collect();
-    items.sort_by(|(an, am), (bn, bm)| am.priority.cmp(&bm.priority).then_with(|| an.cmp(bn)));
-
-    let mut emitted_any = false;
-
-    for (name, m) in items {
+    // Build DepNodes for eligible modules (enabled + platform)
+    let mut nodes: Vec<DepNode> = Vec::new();
+    for (name, m) in cfg.modules.apps.items.iter() {
         if !m.enabled {
             continue;
         }
@@ -251,21 +266,45 @@ pub fn emit_apps(ctx: &ContextEnv, rt: &RuntimeEnv, cfg: &Config, shell: Shell) 
             continue;
         }
 
-        // Detect using the *current* work.vars (which may already include earlier PATH/env).
-        if let Some(det) = detect_one_app(ctx, &work, name, m)? {
-            emitted_any = true;
-            em.comment(&mut out, &format!("--- app: {} ---", det.name));
-            emit_app_module_into(&em, &mut out, ctx, &work, &det.detect, &det.module.emit)?;
+        let key = module_key("apps", name);
+        let requires = normalize_requires_list(&m.requires)?;
 
-            // Mutate work.vars to reflect what we just emitted (env + PATH)
-            // so the next module can detect against it.
-            apply_emit_effects_to_runtime(ctx, &mut work, &det.detect, &det.module.emit)?;
+        nodes.push(DepNode {
+            key,
+            name: name.clone(),
+            priority: m.priority,
+            requires,
+        });
+    }
+
+    let ordered = topo_sort_group(nodes, "apps")?;
+
+    let mut emitted_any = false;
+
+    for node in ordered {
+        if !requires_satisfied(active, &node.requires) {
+            continue;
+        }
+
+        let m = cfg.modules.apps.items.get(&node.name).expect("node name exists");
+
+        if let Some(det) = detect_one_app(ctx, rt, &node.name, m)? {
+            emitted_any = true;
+
+            em.comment(&mut out, &format!("--- app: {} ---", det.name));
+            emit_app_module_into(&em, &mut out, ctx, rt, &det.detect, &det.module.emit)?;
+
+            // Mark active AFTER successful activation
+            active.insert(module_key("apps", &node.name));
+
+            // Update runtime for subsequent detection + later groups
+            apply_emit_effects_to_runtime(ctx, rt, &det.detect, &det.module.emit)?;
+
             em.blank(&mut out);
         }
     }
 
     if !emitted_any {
-        // keep output clean; if nothing active, return empty (no header)
         return Ok(String::new());
     }
 

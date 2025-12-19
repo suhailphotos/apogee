@@ -9,6 +9,7 @@ use std::{
 use crate::{
     config::{CloudModule, Config, EmitBlock, Platform, Shell},
     context::ContextEnv,
+    deps::{module_key, normalize_requires_list, requires_satisfied, topo_sort_group, DepNode},
     emit::Emitter,
     resolve::{DetectVars, Resolver},
     runtime::RuntimeEnv,
@@ -48,7 +49,7 @@ pub fn detect_cloud_modules(
 }
 
 fn module_supports_platform(m: &CloudModule, p: Platform) -> bool {
-  m.platforms.is_empty() || m.platforms.contains(&p)
+    m.platforms.is_empty() || m.platforms.contains(&p)
 }
 
 fn detect_one_cloud(
@@ -87,7 +88,6 @@ fn detect_one_cloud(
         }
     }
 
-    // no match => inactive
     Ok(None)
 }
 
@@ -104,12 +104,10 @@ fn platform_any_of(block: &crate::config::PlatformAnyOf, p: Platform) -> &Vec<St
 /// Supports plain paths and simple globs like "/Applications/Houdini*.app" or "/opt/hfs*".
 /// Returns the FIRST match (full path string).
 fn first_path_match(pattern: &str) -> Result<Option<String>> {
-    // No glob characters => just exists()
     if !pattern.contains('*') && !pattern.contains('?') {
         return Ok(Path::new(pattern).exists().then(|| pattern.to_string()));
     }
 
-    // glob on last segment: <dir>/<name_glob>
     let (dir, glob) = split_dir_and_glob(pattern);
     let dir_path = Path::new(&dir);
     if !dir_path.exists() || !dir_path.is_dir() {
@@ -122,7 +120,6 @@ fn first_path_match(pattern: &str) -> Result<Option<String>> {
         .filter_map(|e| e.ok())
         .collect::<Vec<_>>();
 
-    // deterministic
     entries.sort_by_key(|e| e.file_name());
 
     for e in entries {
@@ -150,7 +147,6 @@ fn split_dir_and_glob(p: &str) -> (String, String) {
 }
 
 fn glob_to_regex(glob: &str) -> Result<Regex> {
-    // escape regex meta, then replace glob tokens
     let mut s = String::new();
     s.push('^');
     for ch in glob.chars() {
@@ -177,25 +173,82 @@ fn first_present_env(vars: &BTreeMap<String, String>, keys: &[String]) -> Option
     None
 }
 
-// --------------------- EMIT (cloud only) ---------------------
+// --------------------- EMIT (cloud, deps-gated + seq runtime) ---------------------
 
-pub fn emit_cloud(ctx: &ContextEnv, rt: &RuntimeEnv, cfg: &Config, shell: Shell) -> Result<String> {
-    let detected = detect_cloud_modules(ctx, rt, cfg)?;
+pub fn emit_cloud_with_active(
+    ctx: &ContextEnv,
+    rt: &RuntimeEnv,
+    cfg: &Config,
+    shell: Shell,
+    active: &mut BTreeSet<String>,
+) -> Result<String> {
+    let mut work = rt.clone();
+    emit_cloud_seq(ctx, &mut work, cfg, shell, active)
+}
 
-    if detected.is_empty() {
+pub fn emit_cloud_seq(
+    ctx: &ContextEnv,
+    rt: &mut RuntimeEnv,
+    cfg: &Config,
+    shell: Shell,
+    active: &mut BTreeSet<String>,
+) -> Result<String> {
+    if !cfg.modules.enable_cloud || !cfg.modules.cloud.enabled {
         return Ok(String::new());
     }
 
     let em = Emitter::new(shell);
-
-    // one buffer, written into (no per-module String allocations)
     let mut out = String::new();
     em.header(&mut out, "apogee (cloud)");
 
-    for d in detected {
-        em.comment(&mut out, &format!("--- cloud: {} ---", d.name));
-        emit_cloud_module_into(&em, &mut out, ctx, rt, &d.detect, &d.module.emit)?;
-        em.blank(&mut out);
+    // Build DepNodes for eligible modules (enabled + platform)
+    let mut nodes: Vec<DepNode> = Vec::new();
+    for (name, m) in cfg.modules.cloud.items.iter() {
+        if !m.enabled {
+            continue;
+        }
+        if !module_supports_platform(m, ctx.platform) {
+            continue;
+        }
+
+        let key = module_key("cloud", name);
+        let requires = normalize_requires_list(&m.requires)?;
+
+        nodes.push(DepNode {
+            key,
+            name: name.clone(),
+            priority: m.priority,
+            requires,
+        });
+    }
+
+    let ordered = topo_sort_group(nodes, "cloud")?;
+
+    let mut emitted_any = false;
+
+    for node in ordered {
+        if !requires_satisfied(active, &node.requires) {
+            continue;
+        }
+
+        let m = cfg.modules.cloud.items.get(&node.name).expect("node name exists");
+
+        if let Some(det) = detect_one_cloud(ctx, rt, &node.name, m)? {
+            emitted_any = true;
+
+            em.comment(&mut out, &format!("--- cloud: {} ---", det.name));
+            emit_cloud_module_into(&em, &mut out, ctx, rt, &det.detect, &det.module.emit)?;
+
+            active.insert(module_key("cloud", &node.name));
+
+            apply_emit_effects_to_runtime(ctx, rt, &det.detect, &det.module.emit)?;
+
+            em.blank(&mut out);
+        }
+    }
+
+    if !emitted_any {
+        return Ok(String::new());
     }
 
     Ok(out)
@@ -211,7 +264,6 @@ fn emit_cloud_module_into(
 ) -> Result<()> {
     let r = Resolver::new(ctx, &rt.vars).with_detect(detect);
 
-    // Combine env + env_derived into one assignment map (tokens resolved, $VARS preserved)
     let mut assigns: BTreeMap<String, String> = BTreeMap::new();
 
     for (k, v) in emit.env.iter() {
@@ -221,14 +273,10 @@ fn emit_cloud_module_into(
         assigns.insert(k.clone(), r.resolve(v)?);
     }
 
-    // Emit env exports in dependency order (based on $VAR refs)
-    let ordered = order_env_assignments(&assigns);
-
-    for (k, v) in ordered {
+    for (k, v) in order_env_assignments(&assigns) {
         em.set_env(out, &k, &v);
     }
 
-    // Aliases
     if !emit.aliases.is_empty() {
         em.blank(out);
         for (name, raw) in emit.aliases.iter() {
@@ -237,7 +285,6 @@ fn emit_cloud_module_into(
         }
     }
 
-    // PATH mods (runtime checks, not Rust-side expansion)
     if !emit.paths.prepend_if_exists.is_empty() || !emit.paths.append_if_exists.is_empty() {
         em.blank(out);
         for p in emit.paths.prepend_if_exists.iter() {
@@ -253,12 +300,83 @@ fn emit_cloud_module_into(
     Ok(())
 }
 
+fn apply_emit_effects_to_runtime(
+    ctx: &ContextEnv,
+    rt: &mut RuntimeEnv,
+    detect: &DetectVars,
+    emit: &EmitBlock,
+) -> Result<()> {
+    let snap1 = rt.vars.clone();
+    let r1 = Resolver::new(ctx, &snap1).with_detect(detect);
+
+    let mut assigns: BTreeMap<String, String> = BTreeMap::new();
+    for (k, v) in emit.env.iter() {
+        assigns.insert(k.clone(), r1.resolve(v)?);
+    }
+    for (k, v) in emit.env_derived.iter() {
+        assigns.insert(k.clone(), r1.resolve(v)?);
+    }
+
+    for (k, v) in order_env_assignments(&assigns) {
+        rt.vars.insert(k, v);
+    }
+
+    // NOTE: cloud may also have PATH effects; keep this consistent with apps behavior
+    let snap2 = rt.vars.clone();
+    let r2 = Resolver::new(ctx, &snap2).with_detect(detect);
+
+    let sep = if matches!(ctx.platform, Platform::Windows) { ';' } else { ':' };
+    let path_key_primary = if matches!(ctx.platform, Platform::Windows) { "Path" } else { "PATH" };
+
+    let mut path_val = snap2
+        .get(path_key_primary)
+        .cloned()
+        .or_else(|| snap2.get("PATH").cloned())
+        .or_else(|| snap2.get("Path").cloned())
+        .unwrap_or_default();
+
+    let mut parts: Vec<String> = path_val
+        .split(sep)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    let mut have: BTreeSet<String> = parts.iter().cloned().collect();
+
+    for raw in emit.paths.prepend_if_exists.iter() {
+        let d = r2.resolve(raw)?;
+        if d.is_empty() || !Path::new(&d).is_dir() {
+            continue;
+        }
+        if have.insert(d.clone()) {
+            parts.insert(0, d);
+        }
+    }
+
+    for raw in emit.paths.append_if_exists.iter() {
+        let d = r2.resolve(raw)?;
+        if d.is_empty() || !Path::new(&d).is_dir() {
+            continue;
+        }
+        if have.insert(d.clone()) {
+            parts.push(d);
+        }
+    }
+
+    path_val = parts.join(&sep.to_string());
+
+    rt.vars.insert("PATH".to_string(), path_val.clone());
+    rt.vars.insert("Path".to_string(), path_val);
+
+    Ok(())
+}
+
 // ---------------- ordering ----------------
 
 fn order_env_assignments(assigns: &BTreeMap<String, String>) -> Vec<(String, String)> {
     let keys: BTreeSet<String> = assigns.keys().cloned().collect();
 
-    // deps[k] = vars this k depends on (within this assigns set)
     let mut deps: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut indeg: BTreeMap<String, usize> = BTreeMap::new();
 
@@ -272,12 +390,10 @@ fn order_env_assignments(assigns: &BTreeMap<String, String>) -> Vec<(String, Str
         indeg.insert(k.clone(), 0);
     }
 
-    // compute indegree
     for (k, ds) in deps.iter() {
         *indeg.get_mut(k).unwrap() = ds.len();
     }
 
-    // queue nodes with indegree 0
     let mut q = VecDeque::new();
     for (k, n) in indeg.iter() {
         if *n == 0 {
@@ -290,7 +406,6 @@ fn order_env_assignments(assigns: &BTreeMap<String, String>) -> Vec<(String, Str
     while let Some(n) = q.pop_front() {
         ordered_keys.push(n.clone());
 
-        // reduce indegree of nodes that depend on n
         for (k, ds) in deps.iter() {
             if ds.contains(&n) {
                 let e = indeg.get_mut(k).unwrap();
@@ -302,7 +417,6 @@ fn order_env_assignments(assigns: &BTreeMap<String, String>) -> Vec<(String, Str
         }
     }
 
-    // cycle fallback: append remaining in lexical order (stable + predictable)
     if ordered_keys.len() != assigns.len() {
         for k in assigns.keys() {
             if !ordered_keys.contains(k) {
@@ -317,10 +431,7 @@ fn order_env_assignments(assigns: &BTreeMap<String, String>) -> Vec<(String, Str
         .collect()
 }
 
-/// Extract deps from POSIX-style $FOO or ${FOO}.
-/// (Your config uses this style; Emitter will rewrite to pwsh $env:FOO on output.)
 fn extract_deps_posix(v: &str) -> Vec<String> {
-    // $FOO or ${FOO}
     let re = Regex::new(r"\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\}").unwrap();
     re.captures_iter(v)
         .filter_map(|c| {
