@@ -7,8 +7,9 @@ pub mod runtime;
 pub mod apps;
 pub mod deps;
 pub mod templates;
+pub mod hooks;
 
-// Convenience re-exports (optional, but nice)
+// Convenience re-exports
 pub use deps::{
     module_key,
     normalize_require_key,
@@ -39,3 +40,8 @@ pub use config::{Config, Platform, Shell};
 pub use context::ContextEnv;
 pub use emit::Emitter;
 pub use runtime::RuntimeEnv;
+
+pub mod global;
+pub use global::emit_global;
+
+pub use hooks::emit_hooks;

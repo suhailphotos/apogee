@@ -171,7 +171,7 @@ fn default_shell() -> Shell {
     Shell::Zsh
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Shell {
     Zsh,
