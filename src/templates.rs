@@ -74,7 +74,9 @@ pub fn emit_templates_with_active(
             .expect("template node exists");
 
         let rendered = render_one_template(ctx, rt, shell, &node.name, m)?;
-        let Some(rendered) = rendered else { continue; };
+        let Some(rendered) = rendered else {
+            continue;
+        };
 
         emitted_any = true;
 

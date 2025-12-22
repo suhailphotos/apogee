@@ -1,38 +1,23 @@
+pub mod apps;
 pub mod cloud;
 pub mod config;
 pub mod context;
+pub mod deps;
 pub mod emit;
+pub mod hooks;
 pub mod resolve;
 pub mod runtime;
-pub mod apps;
-pub mod deps;
 pub mod templates;
-pub mod hooks;
 
 // Convenience re-exports
 pub use deps::{
-    module_key,
-    normalize_require_key,
-    normalize_requires_list,
-    requires_satisfied,
-    topo_sort_group,
-    DepNode,
+    module_key, normalize_require_key, normalize_requires_list, requires_satisfied,
+    topo_sort_group, DepNode,
 };
 
-pub use cloud::{
-    detect_cloud_modules,
-    emit_cloud_seq,
-    emit_cloud_with_active,
-    DetectedCloud,
-};
+pub use cloud::{detect_cloud_modules, emit_cloud_seq, emit_cloud_with_active, DetectedCloud};
 
-pub use apps::{
-    detect_app_modules,
-    emit_apps,
-    emit_apps_seq,
-    emit_apps_with_active,
-    DetectedApp,
-};
+pub use apps::{detect_app_modules, emit_apps, emit_apps_seq, emit_apps_with_active, DetectedApp};
 
 pub use templates::emit_templates_with_active;
 

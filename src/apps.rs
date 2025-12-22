@@ -8,14 +8,19 @@ use std::{
 };
 
 use crate::{
-    config::{AppModule, Config, EmitBlock, Platform, PlatformAnyOf, Shell, VersionDetect, VersionDetectSpec},
+    config::{
+        AppModule, Config, EmitBlock, Platform, PlatformAnyOf, Shell, VersionDetect,
+        VersionDetectSpec,
+    },
     context::ContextEnv,
     emit::Emitter,
     resolve::{DetectVars, Resolver},
     runtime::RuntimeEnv,
 };
 
-use crate::deps::{module_key, normalize_requires_list, requires_satisfied, topo_sort_group, DepNode};
+use crate::deps::{
+    module_key, normalize_requires_list, requires_satisfied, topo_sort_group, DepNode,
+};
 
 #[derive(Debug, Clone)]
 pub struct DetectedApp {
@@ -24,7 +29,11 @@ pub struct DetectedApp {
     pub module: AppModule,
 }
 
-pub fn detect_app_modules(ctx: &ContextEnv, rt: &RuntimeEnv, cfg: &Config) -> Result<Vec<DetectedApp>> {
+pub fn detect_app_modules(
+    ctx: &ContextEnv,
+    rt: &RuntimeEnv,
+    cfg: &Config,
+) -> Result<Vec<DetectedApp>> {
     if !cfg.modules.enable_apps || !cfg.modules.apps.enabled {
         return Ok(vec![]);
     }
@@ -50,7 +59,12 @@ fn module_supports_platform(m: &AppModule, p: Platform) -> bool {
     m.platforms.is_empty() || m.platforms.contains(&p)
 }
 
-fn detect_one_app(ctx: &ContextEnv, rt: &RuntimeEnv, name: &str, m: &AppModule) -> Result<Option<DetectedApp>> {
+fn detect_one_app(
+    ctx: &ContextEnv,
+    rt: &RuntimeEnv,
+    name: &str,
+    m: &AppModule,
+) -> Result<Option<DetectedApp>> {
     // We'll progressively fill detect vars, and consider the module "active"
     // as soon as any detection method matches.
     let mut detect = DetectVars::new();
@@ -75,10 +89,16 @@ fn detect_one_app(ctx: &ContextEnv, rt: &RuntimeEnv, name: &str, m: &AppModule) 
             .with_context(|| format!("apps.{name}: failed to resolve detect command: {raw}"))?;
 
         if let Some(found) = resolve_command(ctx.platform, &rt.vars, &cmd) {
-            let dir = found.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+            let dir = found
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
 
             detect.insert("command".to_string(), cmd.clone());
-            detect.insert("command_path".to_string(), found.to_string_lossy().to_string());
+            detect.insert(
+                "command_path".to_string(),
+                found.to_string_lossy().to_string(),
+            );
             detect.insert("command_dir".to_string(), dir);
 
             attach_version_if_any(ctx, rt, m.detect.version.as_ref(), &mut detect)?;
@@ -93,9 +113,9 @@ fn detect_one_app(ctx: &ContextEnv, rt: &RuntimeEnv, name: &str, m: &AppModule) 
     // 3) file detection (platform any_of + optional globs; first match wins)
     for raw in platform_any_of(&m.detect.files, ctx.platform).iter() {
         let r = Resolver::new(ctx, &rt.vars);
-        let resolved = r
-            .resolve(raw)
-            .with_context(|| format!("apps.{name}: failed to resolve detect file pattern: {raw}"))?;
+        let resolved = r.resolve(raw).with_context(|| {
+            format!("apps.{name}: failed to resolve detect file pattern: {raw}")
+        })?;
 
         if let Some(found) = first_path_match(&resolved)? {
             detect.insert("file".to_string(), found);
@@ -111,9 +131,9 @@ fn detect_one_app(ctx: &ContextEnv, rt: &RuntimeEnv, name: &str, m: &AppModule) 
     // 4) path detection (platform any_of + optional globs; first match wins)
     for raw in platform_any_of(&m.detect.paths, ctx.platform).iter() {
         let r = Resolver::new(ctx, &rt.vars);
-        let resolved = r
-            .resolve(raw)
-            .with_context(|| format!("apps.{name}: failed to resolve detect path pattern: {raw}"))?;
+        let resolved = r.resolve(raw).with_context(|| {
+            format!("apps.{name}: failed to resolve detect path pattern: {raw}")
+        })?;
 
         if let Some(found) = first_path_match(&resolved)? {
             detect.insert("path".to_string(), found);
@@ -135,8 +155,12 @@ fn attach_version_if_any(
     spec: Option<&VersionDetectSpec>,
     detect: &mut DetectVars,
 ) -> Result<()> {
-    let Some(spec) = spec else { return Ok(()); };
-    let Some(list) = spec.for_platform(ctx.platform) else { return Ok(()); };
+    let Some(spec) = spec else {
+        return Ok(());
+    };
+    let Some(list) = spec.for_platform(ctx.platform) else {
+        return Ok(());
+    };
 
     for vd in list.iter() {
         if let Some(v) = detect_version(ctx, rt, detect, vd)? {
@@ -147,9 +171,19 @@ fn attach_version_if_any(
     Ok(())
 }
 
-fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &VersionDetect) -> Result<Option<String>> {
+fn detect_version(
+    ctx: &ContextEnv,
+    rt: &RuntimeEnv,
+    detect: &DetectVars,
+    vd: &VersionDetect,
+) -> Result<Option<String>> {
     match vd {
-        VersionDetect::Command { command, args, regex, capture } => {
+        VersionDetect::Command {
+            command,
+            args,
+            regex,
+            capture,
+        } => {
             let r = Resolver::new(ctx, &rt.vars).with_detect(detect);
 
             let cmd = if let Some(p) = detect.get("command_path") {
@@ -160,8 +194,10 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
 
             let mut resolved_args = Vec::with_capacity(args.len());
             for a in args {
-                resolved_args.push(r.resolve(a)
-                    .with_context(|| format!("failed to resolve version arg: {a}"))?);
+                resolved_args.push(
+                    r.resolve(a)
+                        .with_context(|| format!("failed to resolve version arg: {a}"))?,
+                );
             }
 
             let out = match Command::new(&cmd).args(&resolved_args).output() {
@@ -181,10 +217,12 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
             }
 
             if let Some(re_s) = regex.as_ref() {
-                let re = Regex::new(re_s)
-                    .with_context(|| format!("invalid version regex: {re_s}"))?;
+                let re =
+                    Regex::new(re_s).with_context(|| format!("invalid version regex: {re_s}"))?;
                 let caps = re.captures(&text);
-                let Some(caps) = caps else { return Ok(None); };
+                let Some(caps) = caps else {
+                    return Ok(None);
+                };
 
                 let m = caps
                     .name(capture)
@@ -193,7 +231,11 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
 
                 Ok(m)
             } else {
-                Ok(text.lines().next().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
+                Ok(text
+                    .lines()
+                    .next()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty()))
             }
         }
 
@@ -203,13 +245,16 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
                 .or_else(|| detect.get("file"))
                 .or_else(|| detect.get("command"));
 
-            let Some(target) = target else { return Ok(None); };
+            let Some(target) = target else {
+                return Ok(None);
+            };
 
-            let re = Regex::new(regex)
-                .with_context(|| format!("invalid path regex: {regex}"))?;
+            let re = Regex::new(regex).with_context(|| format!("invalid path regex: {regex}"))?;
 
             let caps = re.captures(target);
-            let Some(caps) = caps else { return Ok(None); };
+            let Some(caps) = caps else {
+                return Ok(None);
+            };
 
             let m = caps
                 .name(capture)
@@ -219,7 +264,12 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
             Ok(m)
         }
 
-        VersionDetect::MacBundlePlist { path, key, regex, capture } => {
+        VersionDetect::MacBundlePlist {
+            path,
+            key,
+            regex,
+            capture,
+        } => {
             if !matches!(ctx.platform, Platform::Mac) {
                 return Ok(None);
             }
@@ -228,12 +278,19 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
             let p = r.resolve(path)?;
 
             let raw = mac_bundle_plist_key(&p, key);
-            let Some(raw) = raw else { return Ok(None); };
+            let Some(raw) = raw else {
+                return Ok(None);
+            };
 
             apply_optional_regex(&raw, regex, capture)
         }
 
-        VersionDetect::WindowsFileVersion { path, field, regex, capture } => {
+        VersionDetect::WindowsFileVersion {
+            path,
+            field,
+            regex,
+            capture,
+        } => {
             if !matches!(ctx.platform, Platform::Windows) {
                 return Ok(None);
             }
@@ -243,12 +300,20 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
             let field = field.as_deref().unwrap_or("ProductVersion");
 
             let raw = windows_file_version(&p, field);
-            let Some(raw) = raw else { return Ok(None); };
+            let Some(raw) = raw else {
+                return Ok(None);
+            };
 
             apply_optional_regex(&raw, regex, capture)
         }
 
-        VersionDetect::LinuxDesktopFileKey { path, section, key, regex, capture } => {
+        VersionDetect::LinuxDesktopFileKey {
+            path,
+            section,
+            key,
+            regex,
+            capture,
+        } => {
             if !matches!(ctx.platform, Platform::Linux | Platform::Wsl) {
                 return Ok(None);
             }
@@ -258,7 +323,9 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
             let section = section.as_deref().unwrap_or("Desktop Entry");
 
             let raw = linux_desktop_key(&p, section, key);
-            let Some(raw) = raw else { return Ok(None); };
+            let Some(raw) = raw else {
+                return Ok(None);
+            };
 
             apply_optional_regex(&raw, regex, capture)
         }
@@ -328,7 +395,12 @@ pub fn emit_apps_seq(
             continue;
         }
 
-        let m = cfg.modules.apps.items.get(&node.name).expect("node name exists");
+        let m = cfg
+            .modules
+            .apps
+            .items
+            .get(&node.name)
+            .expect("node name exists");
 
         if let Some(det) = detect_one_app(ctx, rt, &node.name, m)? {
             emitted_any = true;
@@ -389,7 +461,6 @@ fn emit_app_module_into(
             em.path_append_if_exists(out, &s);
         }
     }
-
 
     // Functions (source external scripts)
     if !emit.functions.files.is_empty() {
@@ -470,8 +541,16 @@ fn apply_emit_effects_to_runtime(
     let snap2 = rt.vars.clone();
     let r2 = Resolver::new(ctx, &snap2).with_detect(detect);
 
-    let sep = if matches!(ctx.platform, Platform::Windows) { ';' } else { ':' };
-    let path_key_primary = if matches!(ctx.platform, Platform::Windows) { "Path" } else { "PATH" };
+    let sep = if matches!(ctx.platform, Platform::Windows) {
+        ';'
+    } else {
+        ':'
+    };
+    let path_key_primary = if matches!(ctx.platform, Platform::Windows) {
+        "Path"
+    } else {
+        "PATH"
+    };
 
     let mut path_val = snap2
         .get(path_key_primary)
@@ -520,7 +599,6 @@ fn apply_emit_effects_to_runtime(
     Ok(())
 }
 
-
 // --------------------- helpers ---------------------
 
 fn platform_any_of(block: &PlatformAnyOf, p: Platform) -> &Vec<String> {
@@ -567,8 +645,14 @@ fn first_path_match(pattern: &str) -> Result<Option<String>> {
 
 fn split_dir_and_glob(p: &str) -> (String, String) {
     let pb = PathBuf::from(p);
-    let dir = pb.parent().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| ".".to_string());
-    let glob = pb.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| p.to_string());
+    let dir = pb
+        .parent()
+        .map(|x| x.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".".to_string());
+    let glob = pb
+        .file_name()
+        .map(|x| x.to_string_lossy().to_string())
+        .unwrap_or_else(|| p.to_string());
     (dir, glob)
 }
 
@@ -599,7 +683,11 @@ fn first_present_env(vars: &BTreeMap<String, String>, keys: &[String]) -> Option
     None
 }
 
-fn resolve_command(platform: Platform, vars: &BTreeMap<String, String>, cmd: &str) -> Option<PathBuf> {
+fn resolve_command(
+    platform: Platform,
+    vars: &BTreeMap<String, String>,
+    cmd: &str,
+) -> Option<PathBuf> {
     // If it contains a path separator, treat as an explicit path.
     if cmd.contains('/') || cmd.contains('\\') {
         let p = PathBuf::from(cmd);
@@ -621,9 +709,18 @@ fn resolve_command(platform: Platform, vars: &BTreeMap<String, String>, cmd: &st
     None
 }
 
-fn resolve_on_path(platform: Platform, vars: &BTreeMap<String, String>, cmd: &str) -> Option<PathBuf> {
-    let path_key = if matches!(platform, Platform::Windows) { "Path" } else { "PATH" };
-    let path_val = vars.get(path_key)
+fn resolve_on_path(
+    platform: Platform,
+    vars: &BTreeMap<String, String>,
+    cmd: &str,
+) -> Option<PathBuf> {
+    let path_key = if matches!(platform, Platform::Windows) {
+        "Path"
+    } else {
+        "PATH"
+    };
+    let path_val = vars
+        .get(path_key)
         .or_else(|| vars.get("PATH"))
         .or_else(|| vars.get("Path"))
         .map(|s| s.as_str())
@@ -633,8 +730,16 @@ fn resolve_on_path(platform: Platform, vars: &BTreeMap<String, String>, cmd: &st
         return None;
     }
 
-    let sep = if matches!(platform, Platform::Windows) { ';' } else { ':' };
-    for dir in path_val.split(sep).map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    let sep = if matches!(platform, Platform::Windows) {
+        ';'
+    } else {
+        ':'
+    };
+    for dir in path_val
+        .split(sep)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         let base = PathBuf::from(dir);
         if let Some(p) = resolve_in_dir(platform, vars, &base, cmd) {
             return Some(p);
@@ -644,7 +749,12 @@ fn resolve_on_path(platform: Platform, vars: &BTreeMap<String, String>, cmd: &st
     None
 }
 
-fn resolve_in_dir(platform: Platform, vars: &BTreeMap<String, String>, dir: &Path, cmd: &str) -> Option<PathBuf> {
+fn resolve_in_dir(
+    platform: Platform,
+    vars: &BTreeMap<String, String>,
+    dir: &Path,
+    cmd: &str,
+) -> Option<PathBuf> {
     if !dir.is_dir() {
         return None;
     }
@@ -785,13 +895,20 @@ fn pathext_list(vars: &BTreeMap<String, String>) -> Vec<String> {
     }
 
     if out.is_empty() {
-        out = vec![".com", ".exe", ".bat", ".cmd"].into_iter().map(|s| s.to_string()).collect();
+        out = vec![".com", ".exe", ".bat", ".cmd"]
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
     }
 
     out
 }
 
-fn apply_optional_regex(text: &str, regex: &Option<String>, capture: &str) -> Result<Option<String>> {
+fn apply_optional_regex(
+    text: &str,
+    regex: &Option<String>,
+    capture: &str,
+) -> Result<Option<String>> {
     let t = text.trim();
     if t.is_empty() {
         return Ok(None);
@@ -806,11 +923,10 @@ fn apply_optional_regex(text: &str, regex: &Option<String>, capture: &str) -> Re
         return Ok(None);
     };
 
-    Ok(
-        caps.name(capture)
-            .or_else(|| caps.get(1))
-            .map(|m| m.as_str().to_string())
-    )
+    Ok(caps
+        .name(capture)
+        .or_else(|| caps.get(1))
+        .map(|m| m.as_str().to_string()))
 }
 
 fn mac_bundle_plist_key(app_or_plist: &str, key: &str) -> Option<String> {
@@ -977,6 +1093,10 @@ fn order_env_assignments(assigns: &BTreeMap<String, String>) -> Vec<(String, Str
 fn extract_deps_posix(v: &str) -> Vec<String> {
     let re = Regex::new(r"\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\}").unwrap();
     re.captures_iter(v)
-        .filter_map(|c| c.get(1).or_else(|| c.get(2)).map(|m| m.as_str().to_string()))
+        .filter_map(|c| {
+            c.get(1)
+                .or_else(|| c.get(2))
+                .map(|m| m.as_str().to_string())
+        })
         .collect()
 }

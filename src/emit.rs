@@ -83,9 +83,18 @@ impl Emitter {
         }
     }
 
-    pub fn init_eval_if_exists(&self, out: &mut String, cmd: &str, args: &[String], pwsh_out_string: bool) {
+    pub fn init_eval_if_exists(
+        &self,
+        out: &mut String,
+        cmd: &str,
+        args: &[String],
+        pwsh_out_string: bool,
+    ) {
         let c = self.rewrite_value_for_shell(cmd);
-        let args: Vec<String> = args.iter().map(|a| self.rewrite_value_for_shell(a)).collect();
+        let args: Vec<String> = args
+            .iter()
+            .map(|a| self.rewrite_value_for_shell(a))
+            .collect();
 
         let is_path = c.contains('/') || c.contains('\\');
 
@@ -144,7 +153,7 @@ impl Emitter {
                 } else {
                     out.push_str("Invoke-Expression (");
                     out.push_str(&words);
-                    out.push_str(")");
+                    out.push(')');
                 }
 
                 out.push_str(" }\n");
@@ -162,7 +171,7 @@ impl Emitter {
                 out.push_str(" ]; then __apogee_dir=");
                 out.push_str(&quote_posix(&d));
                 out.push_str("; case \":$PATH:\" in *\":$__apogee_dir:\"*) ;; *) export PATH=");
-                out.push_str(&quote_posix(&format!("$PATH:$__apogee_dir")));
+                out.push_str(&quote_posix("$PATH:$__apogee_dir"));
                 out.push_str(" ;; esac; unset __apogee_dir; fi\n");
             }
             Shell::Fish => {
@@ -197,7 +206,7 @@ impl Emitter {
                 out.push_str(" ]; then __apogee_dir=");
                 out.push_str(&quote_posix(&d));
                 out.push_str("; case \":$PATH:\" in *\":$__apogee_dir:\"*) ;; *) export PATH=");
-                out.push_str(&quote_posix(&format!("$__apogee_dir:$PATH")));
+                out.push_str(&quote_posix("$__apogee_dir:$PATH"));
                 out.push_str(" ;; esac; unset __apogee_dir; fi\n");
             }
             Shell::Fish => {

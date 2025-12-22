@@ -231,7 +231,12 @@ pub fn emit_cloud_seq(
             continue;
         }
 
-        let m = cfg.modules.cloud.items.get(&node.name).expect("node name exists");
+        let m = cfg
+            .modules
+            .cloud
+            .items
+            .get(&node.name)
+            .expect("node name exists");
 
         if let Some(det) = detect_one_cloud(ctx, rt, &node.name, m)? {
             emitted_any = true;
@@ -325,8 +330,16 @@ fn apply_emit_effects_to_runtime(
     let snap2 = rt.vars.clone();
     let r2 = Resolver::new(ctx, &snap2).with_detect(detect);
 
-    let sep = if matches!(ctx.platform, Platform::Windows) { ';' } else { ':' };
-    let path_key_primary = if matches!(ctx.platform, Platform::Windows) { "Path" } else { "PATH" };
+    let sep = if matches!(ctx.platform, Platform::Windows) {
+        ';'
+    } else {
+        ':'
+    };
+    let path_key_primary = if matches!(ctx.platform, Platform::Windows) {
+        "Path"
+    } else {
+        "PATH"
+    };
 
     let mut path_val = snap2
         .get(path_key_primary)

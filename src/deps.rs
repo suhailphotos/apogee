@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
 pub struct DepNode {
-    pub key: String,       // e.g. "apps.uv"
-    pub name: String,      // e.g. "uv" (module name within group)
-    pub priority: i32,     // for tie-breaking
+    pub key: String,           // e.g. "apps.uv"
+    pub name: String,          // e.g. "uv" (module name within group)
+    pub priority: i32,         // for tie-breaking
     pub requires: Vec<String>, // normalized keys
 }
 
@@ -58,8 +58,8 @@ pub fn requires_satisfied(active: &BTreeSet<String>, requires: &[String]) -> boo
 /// Topo-sort nodes by SAME-GROUP dependencies only.
 /// - If a node requires "apps.xyz" and xyz is a node in this list, it becomes an edge.
 /// - Cross-group requires (e.g. "cloud.dropbox") are ignored for ordering here.
-/// Tie-break: priority, then name, then key.
-/// Cycles => error.
+/// - Tie-break: priority, then name, then key.
+/// - Cycles => error.
 pub fn topo_sort_group(nodes: Vec<DepNode>, group: &str) -> Result<Vec<DepNode>> {
     let group_prefix = format!("{}.", group);
 
@@ -86,12 +86,7 @@ pub fn topo_sort_group(nodes: Vec<DepNode>, group: &str) -> Result<Vec<DepNode>>
             }
 
             if !map.contains_key(dep) {
-                bail!(
-                    "{}: requires unknown {} module '{}'",
-                    k,
-                    group,
-                    dep
-                );
+                bail!("{}: requires unknown {} module '{}'", k, group, dep);
             }
 
             // edge dep -> k

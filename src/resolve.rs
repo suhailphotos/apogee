@@ -1,8 +1,8 @@
 use anyhow::{bail, Result};
 use std::collections::BTreeMap;
 
-use crate::context::ContextEnv;
 use crate::config::{Platform, Shell};
+use crate::context::ContextEnv;
 
 pub type DetectVars = BTreeMap<String, String>;
 
@@ -148,7 +148,11 @@ impl<'a> Resolver<'a> {
                 .map(|p| p.to_string_lossy().to_string()),
             "host" => Some(self.ctx.host().to_string()),
             "platform" => Some(self.ctx.platform.to_string()),
-            "shell" => Some(eff_shell.map(|s| s.to_string()).unwrap_or_else(|| "unknown".to_string())),
+            "shell" => Some(
+                eff_shell
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+            ),
 
             // Shell-specific extension (zsh|bash|fish|ps1)
             "shell_ext" => Some(shell_ext(eff_shell).to_string()),
@@ -205,7 +209,6 @@ impl<'a> Resolver<'a> {
     }
 }
 
-
 fn shell_ext(sh: Option<Shell>) -> &'static str {
     match sh {
         Some(Shell::Zsh) => "zsh",
@@ -238,10 +241,15 @@ fn default_xdg_cache_home(_p: Platform, home: &std::path::Path) -> String {
 }
 
 fn default_xdg_data_home(_p: Platform, home: &std::path::Path) -> String {
-    home.join(".local").join("share").to_string_lossy().to_string()
+    home.join(".local")
+        .join("share")
+        .to_string_lossy()
+        .to_string()
 }
 
 fn default_xdg_state_home(_p: Platform, home: &std::path::Path) -> String {
-    home.join(".local").join("state").to_string_lossy().to_string()
+    home.join(".local")
+        .join("state")
+        .to_string_lossy()
+        .to_string()
 }
-

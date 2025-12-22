@@ -1,13 +1,11 @@
-#![allow(dead_code)]
-
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::{
     collections::BTreeMap,
     fmt,
-    str::FromStr,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 fn default_priority() -> i32 {
@@ -206,7 +204,6 @@ impl FromStr for Shell {
     }
 }
 
-
 impl fmt::Display for Shell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
@@ -244,7 +241,6 @@ impl fmt::Display for Platform {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ModulesRoot {
-
     #[serde(default = "default_true")]
     pub enable_cloud: bool,
 
@@ -615,7 +611,6 @@ pub struct EmitInit {
     #[serde(default)]
     pub pwsh_out_string: bool,
 }
-
 
 // ---------------- Templates Modules ----------------
 

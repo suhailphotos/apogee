@@ -1,7 +1,7 @@
 use crate::{
     config::{Config, SecretsStrategy, Shell},
-    emit::Emitter,
     context::ContextEnv,
+    emit::Emitter,
     resolve::Resolver,
 };
 use anyhow::{Context as _, Result};
@@ -154,12 +154,12 @@ fn parse_env_text(text: &str) -> Result<BTreeMap<String, String>> {
 
         // Remove surrounding quotes (simple)
         if val.len() >= 2 {
-          let bytes = val.as_bytes();
-          let first = bytes[0];
-          let last = bytes[bytes.len() - 1];
-          if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
-            val = val[1..val.len() - 1].to_string();
-          }
+            let bytes = val.as_bytes();
+            let first = bytes[0];
+            let last = bytes[bytes.len() - 1];
+            if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+                val = val[1..val.len() - 1].to_string();
+            }
         }
         out.insert(key, val);
     }
@@ -167,7 +167,11 @@ fn parse_env_text(text: &str) -> Result<BTreeMap<String, String>> {
     Ok(out)
 }
 
-pub fn emit_env_delta(shell: Shell, before: &BTreeMap<String, String>, after: &BTreeMap<String, String>) -> String {
+pub fn emit_env_delta(
+    shell: Shell,
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+) -> String {
     let em = Emitter::new(shell);
     let mut out = String::new();
     em.header(&mut out, "apogee (dotenv)");
@@ -184,5 +188,9 @@ pub fn emit_env_delta(shell: Shell, before: &BTreeMap<String, String>, after: &B
         }
     }
 
-    if emitted_any { out } else { String::new() }
+    if emitted_any {
+        out
+    } else {
+        String::new()
+    }
 }

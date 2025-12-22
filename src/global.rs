@@ -7,7 +7,12 @@ use crate::{
     runtime::RuntimeEnv,
 };
 
-pub fn emit_global(ctx: &ContextEnv, _rt: &RuntimeEnv, cfg: &Config, shell: Shell) -> Result<String> {
+pub fn emit_global(
+    ctx: &ContextEnv,
+    _rt: &RuntimeEnv,
+    cfg: &Config,
+    shell: Shell,
+) -> Result<String> {
     let em = Emitter::new(shell);
     let mut out = String::new();
     em.header(&mut out, "apogee (global)");
