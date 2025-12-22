@@ -1,5 +1,6 @@
 use crate::{
-    config::{Config, SecretsStrategy},
+    config::{Config, SecretsStrategy, Shell},
+    emit::Emitter,
     context::ContextEnv,
     resolve::Resolver,
 };
@@ -164,4 +165,24 @@ fn parse_env_text(text: &str) -> Result<BTreeMap<String, String>> {
     }
 
     Ok(out)
+}
+
+pub fn emit_env_delta(shell: Shell, before: &BTreeMap<String, String>, after: &BTreeMap<String, String>) -> String {
+    let em = Emitter::new(shell);
+    let mut out = String::new();
+    em.header(&mut out, "apogee (dotenv)");
+
+    let mut emitted_any = false;
+
+    for (k, v_after) in after.iter() {
+        let v_before = before.get(k);
+
+        // emit if missing OR different
+        if v_before.map(|s| s.as_str()) != Some(v_after.as_str()) {
+            emitted_any = true;
+            em.set_env(&mut out, k, v_after);
+        }
+    }
+
+    if emitted_any { out } else { String::new() }
 }

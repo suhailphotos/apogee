@@ -136,16 +136,14 @@ fn attach_version_if_any(
     detect: &mut DetectVars,
 ) -> Result<()> {
     let Some(spec) = spec else { return Ok(()); };
+    let Some(list) = spec.for_platform(ctx.platform) else { return Ok(()); };
 
-    let Some(vd) = spec.for_platform(ctx.platform) else {
-        return Ok(());
-    };
-
-    let v = detect_version(ctx, rt, detect, vd)?;
-    if let Some(v) = v {
-        detect.insert("version".to_string(), v);
+    for vd in list.iter() {
+        if let Some(v) = detect_version(ctx, rt, detect, vd)? {
+            detect.insert("version".to_string(), v);
+            break;
+        }
     }
-
     Ok(())
 }
 
@@ -219,6 +217,50 @@ fn detect_version(ctx: &ContextEnv, rt: &RuntimeEnv, detect: &DetectVars, vd: &V
                 .map(|m| m.as_str().to_string());
 
             Ok(m)
+        }
+
+        VersionDetect::MacBundlePlist { path, key, regex, capture } => {
+            if !matches!(ctx.platform, Platform::Mac) {
+                return Ok(None);
+            }
+
+            let r = Resolver::new(ctx, &rt.vars).with_detect(detect);
+            let p = r.resolve(path)?;
+
+            let raw = mac_bundle_plist_key(&p, key);
+            let Some(raw) = raw else { return Ok(None); };
+
+            apply_optional_regex(&raw, regex, capture)
+        }
+
+        VersionDetect::WindowsFileVersion { path, field, regex, capture } => {
+            if !matches!(ctx.platform, Platform::Windows) {
+                return Ok(None);
+            }
+
+            let r = Resolver::new(ctx, &rt.vars).with_detect(detect);
+            let p = r.resolve(path)?;
+            let field = field.as_deref().unwrap_or("ProductVersion");
+
+            let raw = windows_file_version(&p, field);
+            let Some(raw) = raw else { return Ok(None); };
+
+            apply_optional_regex(&raw, regex, capture)
+        }
+
+        VersionDetect::LinuxDesktopFileKey { path, section, key, regex, capture } => {
+            if !matches!(ctx.platform, Platform::Linux | Platform::Wsl) {
+                return Ok(None);
+            }
+
+            let r = Resolver::new(ctx, &rt.vars).with_detect(detect);
+            let p = r.resolve(path)?;
+            let section = section.as_deref().unwrap_or("Desktop Entry");
+
+            let raw = linux_desktop_key(&p, section, key);
+            let Some(raw) = raw else { return Ok(None); };
+
+            apply_optional_regex(&raw, regex, capture)
         }
     }
 }
@@ -747,6 +789,130 @@ fn pathext_list(vars: &BTreeMap<String, String>) -> Vec<String> {
     }
 
     out
+}
+
+fn apply_optional_regex(text: &str, regex: &Option<String>, capture: &str) -> Result<Option<String>> {
+    let t = text.trim();
+    if t.is_empty() {
+        return Ok(None);
+    }
+
+    let Some(re_s) = regex.as_ref() else {
+        return Ok(Some(t.to_string()));
+    };
+
+    let re = Regex::new(re_s).with_context(|| format!("invalid version regex: {re_s}"))?;
+    let Some(caps) = re.captures(t) else {
+        return Ok(None);
+    };
+
+    Ok(
+        caps.name(capture)
+            .or_else(|| caps.get(1))
+            .map(|m| m.as_str().to_string())
+    )
+}
+
+fn mac_bundle_plist_key(app_or_plist: &str, key: &str) -> Option<String> {
+    let p = Path::new(app_or_plist);
+
+    let plist_path = if p.is_dir() && p.extension().and_then(|x| x.to_str()) == Some("app") {
+        p.join("Contents").join("Info.plist")
+    } else {
+        p.to_path_buf()
+    };
+
+    let plist_str = plist_path.to_string_lossy().to_string();
+
+    // 1) plutil (handles binary plists)
+    //    plutil -extract KEY raw -o - Info.plist
+    {
+        let out = Command::new("plutil")
+            .args(["-extract", key, "raw", "-o", "-", &plist_str])
+            .output()
+            .ok()?;
+
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                return Some(s);
+            }
+        }
+    }
+
+    // 2) defaults read /path/to/Info.plist KEY
+    {
+        let out = Command::new("defaults")
+            .args(["read", &plist_str, key])
+            .output()
+            .ok()?;
+
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                return Some(s);
+            }
+        }
+    }
+
+    None
+}
+
+fn windows_file_version(path: &str, field: &str) -> Option<String> {
+    // Use PowerShell built-in FileVersionInfo
+    // Prefer pwsh, fallback to Windows PowerShell.
+    let script = format!(
+        "[System.Diagnostics.FileVersionInfo]::GetVersionInfo('{}').{}",
+        path.replace("'", "''"),
+        field
+    );
+
+    for exe in ["pwsh", "powershell"] {
+        let out = Command::new(exe)
+            .args(["-NoProfile", "-Command", &script])
+            .output()
+            .ok()?;
+
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                return Some(s);
+            }
+        }
+    }
+
+    None
+}
+
+fn linux_desktop_key(path: &str, section: &str, key: &str) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let mut in_section = false;
+
+    for line in text.lines() {
+        let s = line.trim();
+        if s.is_empty() || s.starts_with('#') {
+            continue;
+        }
+
+        if s.starts_with('[') && s.ends_with(']') {
+            in_section = &s[1..s.len() - 1] == section;
+            continue;
+        }
+
+        if !in_section {
+            continue;
+        }
+
+        let (k, v) = s.split_once('=')?;
+        if k.trim() == key {
+            let val = v.trim();
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 // ---------------- ordering (same idea as cloud) ----------------

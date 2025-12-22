@@ -444,28 +444,29 @@ pub struct DetectBlock {
 #[serde(deny_unknown_fields)]
 pub struct VersionDetectSpec {
     #[serde(default)]
-    pub all: Option<VersionDetect>,
+    pub all: Option<OneOrMany<VersionDetect>>,
     #[serde(default)]
-    pub mac: Option<VersionDetect>,
+    pub mac: Option<OneOrMany<VersionDetect>>,
     #[serde(default)]
-    pub linux: Option<VersionDetect>,
+    pub linux: Option<OneOrMany<VersionDetect>>,
     #[serde(default)]
-    pub windows: Option<VersionDetect>,
+    pub windows: Option<OneOrMany<VersionDetect>>,
     #[serde(default)]
-    pub wsl: Option<VersionDetect>,
+    pub wsl: Option<OneOrMany<VersionDetect>>,
     #[serde(default)]
-    pub other: Option<VersionDetect>,
+    pub other: Option<OneOrMany<VersionDetect>>,
 }
 
 impl VersionDetectSpec {
-    pub fn for_platform(&self, p: Platform) -> Option<&VersionDetect> {
-        match p {
-            Platform::Mac => self.mac.as_ref().or(self.all.as_ref()),
-            Platform::Linux => self.linux.as_ref().or(self.all.as_ref()),
-            Platform::Windows => self.windows.as_ref().or(self.all.as_ref()),
-            Platform::Wsl => self.wsl.as_ref().or(self.all.as_ref()),
-            Platform::Other => self.other.as_ref().or(self.all.as_ref()),
-        }
+    pub fn for_platform(&self, p: Platform) -> Option<&OneOrMany<VersionDetect>> {
+        let pick = match p {
+            Platform::Mac => self.mac.as_ref(),
+            Platform::Linux => self.linux.as_ref(),
+            Platform::Windows => self.windows.as_ref(),
+            Platform::Wsl => self.wsl.as_ref(),
+            Platform::Other => self.other.as_ref(),
+        };
+        pick.or(self.all.as_ref())
     }
 }
 
@@ -481,8 +482,42 @@ pub enum VersionDetect {
         #[serde(default = "default_version_capture")]
         capture: String,
     },
+
     PathRegex {
         regex: String,
+        #[serde(default = "default_version_capture")]
+        capture: String,
+    },
+
+    // macOS: read Info.plist key from Foo.app (handles binary plists via plutil/defaults)
+    MacBundlePlist {
+        path: String, // "{detect.path}" or "{detect.file}" or explicit
+        key: String,  // "CFBundleShortVersionString" etc
+        #[serde(default)]
+        regex: Option<String>,
+        #[serde(default = "default_version_capture")]
+        capture: String,
+    },
+
+    // Windows: read ProductVersion/FileVersion from an exe/dll
+    WindowsFileVersion {
+        path: String, // "{detect.command_path}" or explicit
+        #[serde(default)]
+        field: Option<String>, // default "ProductVersion" (or "FileVersion")
+        #[serde(default)]
+        regex: Option<String>,
+        #[serde(default = "default_version_capture")]
+        capture: String,
+    },
+
+    // Linux/WSL: parse a key from a .desktop file (optional)
+    LinuxDesktopFileKey {
+        path: String, // path to .desktop
+        #[serde(default)]
+        section: Option<String>, // default "Desktop Entry"
+        key: String,
+        #[serde(default)]
+        regex: Option<String>,
         #[serde(default = "default_version_capture")]
         capture: String,
     },
@@ -490,6 +525,22 @@ pub enum VersionDetect {
 
 fn default_version_capture() -> String {
     "version".to_string()
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum OneOrMany<T> {
+    One(T),
+    Many(Vec<T>),
+}
+
+impl<T> OneOrMany<T> {
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+        match self {
+            OneOrMany::One(x) => std::slice::from_ref(x).iter(),
+            OneOrMany::Many(xs) => xs.iter(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize, Clone)]

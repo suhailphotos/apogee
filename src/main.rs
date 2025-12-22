@@ -16,7 +16,10 @@ fn main() -> Result<()> {
     ctx.vars
         .insert("APOGEE_SHELL".to_string(), shell.to_string());
 
+    let baseline = ctx.vars.clone();
+
     let rt0 = apogee::RuntimeEnv::build(&ctx, &cfg)?;
+    let dotenv_script = apogee::runtime::emit_env_delta(shell, &baseline, &rt0.vars);
 
     let mut work = rt0.clone();
     let mut active: BTreeSet<String> = BTreeSet::new();
@@ -38,6 +41,10 @@ fn main() -> Result<()> {
 
     // Stitch output with clean spacing
     let mut out = String::new();
+
+    if !dotenv_script.trim().is_empty() {
+        out.push_str(&dotenv_script);
+    }
 
     if !global_script.trim().is_empty() {
         out.push_str(&global_script);
