@@ -605,11 +605,13 @@ pub struct EmitInit {
     #[serde(default)]
     pub args: Vec<String>,
 
-    // PowerShell quirk:
-    // zoxide docs use: Invoke-Expression (& { (zoxide init powershell | Out-String) })
-    // starship docs use: Invoke-Expression (&starship init powershell)
     #[serde(default)]
     pub pwsh_out_string: bool,
+
+    // If empty => applies to all shells.
+    // If set => only run init for these shells.
+    #[serde(default)]
+    pub shells: Vec<Shell>,
 }
 
 // ---------------- Templates Modules ----------------

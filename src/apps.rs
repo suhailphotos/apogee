@@ -406,7 +406,7 @@ pub fn emit_apps_seq(
             emitted_any = true;
 
             em.comment(&mut out, &format!("--- app: {} ---", det.name));
-            emit_app_module_into(&em, &mut out, ctx, rt, &det.detect, &det.module.emit)?;
+            emit_app_module_into(&em, &mut out, ctx, rt, shell, &det.detect, &det.module.emit)?;
 
             // Mark active AFTER successful activation
             active.insert(module_key("apps", &node.name));
@@ -430,6 +430,7 @@ fn emit_app_module_into(
     out: &mut String,
     ctx: &ContextEnv,
     rt: &RuntimeEnv,
+    shell: Shell,
     detect: &DetectVars,
     emit: &EmitBlock,
 ) -> Result<()> {
@@ -502,7 +503,11 @@ fn emit_app_module_into(
     if !emit.init.is_empty() {
         em.blank(out);
 
-        for init in emit.init.iter() {
+        for init in emit
+            .init
+            .iter()
+            .filter(|i| i.shells.is_empty() || i.shells.contains(&shell))
+        {
             let cmd = r.resolve(&init.command)?;
             let mut args = Vec::with_capacity(init.args.len());
             for a in init.args.iter() {
