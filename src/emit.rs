@@ -346,49 +346,60 @@ fn quote_pwsh(s: &str) -> String {
 fn rewrite_env_refs_for_pwsh(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len() + 8);
-    let mut i = 0;
+    let mut i = 0usize;
 
     while i < bytes.len() {
-        if bytes[i] != b'$' {
-            out.push(bytes[i] as char);
-            i += 1;
-            continue;
+        // Fast copy until next '$'
+        let mut j = i;
+        while j < bytes.len() && bytes[j] != b'$' {
+            j += 1;
+        }
+        if j > i {
+            out.push_str(&input[i..j]); // safe: '$' is ASCII, so boundary is valid
+            i = j;
+        }
+        if i >= bytes.len() {
+            break;
         }
 
+        // i is at '$'
         if input[i..].starts_with("$env:") {
             out.push_str("$env:");
             i += 5;
             continue;
         }
 
+        // ${NAME}
         if i + 1 < bytes.len() && bytes[i + 1] == b'{' {
-            let mut j = i + 2;
-            while j < bytes.len() && bytes[j] != b'}' {
-                j += 1;
+            let mut k = i + 2;
+            while k < bytes.len() && bytes[k] != b'}' {
+                k += 1;
             }
-            if j < bytes.len() {
-                let name = &input[i + 2..j];
+            if k < bytes.len() && bytes[k] == b'}' {
+                let name = &input[i + 2..k];
                 if is_valid_name(name) {
                     out.push_str("$env:");
                     out.push_str(name);
-                    i = j + 1;
+                    i = k + 1;
                     continue;
                 }
             }
+            // not a valid ${NAME}
             out.push('$');
             i += 1;
             continue;
         }
 
-        let mut j = i + 1;
-        while j < bytes.len() && is_ident_char(bytes[j]) {
-            j += 1;
+        // $NAME
+        let mut k = i + 1;
+        while k < bytes.len() && is_ident_char(bytes[k]) {
+            k += 1;
         }
-        let name = &input[i + 1..j];
+        let name = &input[i + 1..k];
         if is_valid_name(name) {
             out.push_str("$env:");
             out.push_str(name);
-            i = j;
+            i = k;
             continue;
         }
 
