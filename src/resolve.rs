@@ -123,13 +123,21 @@ impl<'a> Resolver<'a> {
         Ok(out)
     }
 
+    fn env_nonempty(&self, key: &str) -> Option<String> {
+        self.env
+            .get(key)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    }
+
     fn token_value(&self, token: &str) -> Option<String> {
         // detect.*
         if let Some(rest) = token.strip_prefix("detect.") {
             let det = self.detect?;
             return det.get(rest).cloned();
         }
-        // Determine effective shell from runtime env first, then context fallback.
+
         let eff_shell: Option<Shell> = self
             .env
             .get("APOGEE_SHELL")
@@ -138,14 +146,8 @@ impl<'a> Resolver<'a> {
 
         match token {
             "home" => Some(self.ctx.home.to_string_lossy().to_string()),
-            "config_dir" => self
-                .ctx
-                .config_dir()
-                .map(|p| p.to_string_lossy().to_string()),
-            "config_path" => self
-                .ctx
-                .config_path()
-                .map(|p| p.to_string_lossy().to_string()),
+            "config_dir" => self.ctx.config_dir().map(|p| p.to_string_lossy().to_string()),
+            "config_path" => self.ctx.config_path().map(|p| p.to_string_lossy().to_string()),
             "host" => Some(self.ctx.host().to_string()),
             "platform" => Some(self.ctx.platform.to_string()),
             "shell" => Some(
@@ -154,22 +156,31 @@ impl<'a> Resolver<'a> {
                     .unwrap_or_else(|| "unknown".to_string()),
             ),
 
-            // Shell-specific extension (zsh|bash|fish|ps1)
             "shell_ext" => Some(shell_ext(eff_shell).to_string()),
-
-            // Shell family (posix|fish|pwsh)
             "shell_family" => Some(shell_family(eff_shell).to_string()),
-
-            // Shell-family extension (sh|fish|ps1)
             "shell_family_ext" => Some(shell_family_ext(eff_shell).to_string()),
 
-            "xdg_config_home" => self
-                .env
-                .get("XDG_CONFIG_HOME")
-                .cloned()
-                .or_else(|| Some(self.ctx.xdg_config_home.to_string_lossy().to_string())),
-            // init-arg for tools that want shell name (starship, zoxide, etc)
-            // zsh|bash|fish|powershell
+            // ✅ XDG tokens: ctx first (normalized), env override if explicitly set
+            "xdg_config_home" => Some(
+                self.env_nonempty("XDG_CONFIG_HOME")
+                    .unwrap_or_else(|| self.ctx.xdg_config_home.to_string_lossy().to_string()),
+            ),
+
+            "xdg_cache_home" => Some(
+                self.env_nonempty("XDG_CACHE_HOME")
+                    .unwrap_or_else(|| default_xdg_cache_home(self.ctx.platform, &self.ctx.home)),
+            ),
+
+            "xdg_data_home" => Some(
+                self.env_nonempty("XDG_DATA_HOME")
+                    .unwrap_or_else(|| default_xdg_data_home(self.ctx.platform, &self.ctx.home)),
+            ),
+
+            "xdg_state_home" => Some(
+                self.env_nonempty("XDG_STATE_HOME")
+                    .unwrap_or_else(|| default_xdg_state_home(self.ctx.platform, &self.ctx.home)),
+            ),
+
             "shell_init" => Some(match eff_shell {
                 Some(Shell::Zsh) => "zsh".to_string(),
                 Some(Shell::Bash) => "bash".to_string(),
@@ -177,32 +188,14 @@ impl<'a> Resolver<'a> {
                 Some(Shell::Pwsh) => "powershell".to_string(),
                 None => "sh".to_string(),
             }),
-            "xdg_cache_home" => self
-                .env
-                .get("XDG_CACHE_HOME")
-                .cloned()
-                .or_else(|| Some(default_xdg_cache_home(self.ctx.platform, &self.ctx.home))),
-            "xdg_data_home" => self
-                .env
-                .get("XDG_DATA_HOME")
-                .cloned()
-                .or_else(|| Some(default_xdg_data_home(self.ctx.platform, &self.ctx.home))),
-            "xdg_state_home" => self
-                .env
-                .get("XDG_STATE_HOME")
-                .cloned()
-                .or_else(|| Some(default_xdg_state_home(self.ctx.platform, &self.ctx.home))),
 
             "userprofile" => self
-                .env
-                .get("USERPROFILE")
-                .cloned()
-                .or_else(|| self.env.get("HOME").cloned()),
+                .env_nonempty("USERPROFILE")
+                .or_else(|| self.env_nonempty("HOME")),
+
             "username" => self
-                .env
-                .get("USERNAME")
-                .cloned()
-                .or_else(|| self.env.get("USER").cloned()),
+                .env_nonempty("USERNAME")
+                .or_else(|| self.env_nonempty("USER")),
 
             _ => None,
         }

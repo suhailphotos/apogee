@@ -66,6 +66,15 @@ impl RuntimeEnv {
             self::merge_env_file(ctx, &mut vars, Path::new(&secrets_path), strategy)?;
         }
 
+        // Apply global env (resolved) into vars so downstream token resolution works.
+        for (k, v_raw) in cfg.global.env.iter() {
+            let r = Resolver::new(ctx, &vars);
+            let v = r
+                .resolve(v_raw)
+                .with_context(|| format!("failed to resolve global env value for {k}"))?;
+            vars.insert(k.clone(), v);
+        }
+
         Ok(Self { vars })
     }
 }

@@ -273,6 +273,9 @@ fn default_true() -> bool {
 #[derive(Debug, Default, Deserialize)]
 pub struct GlobalConfig {
     #[serde(default)]
+    pub env: EnvMap,
+
+    #[serde(default)]
     pub aliases: GlobalAliases,
 }
 
