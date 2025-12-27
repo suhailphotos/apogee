@@ -1,10 +1,13 @@
 use anyhow::{Context as _, Result};
+use glob::glob;
 use regex::Regex;
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, BTreeSet, VecDeque},
     fs,
     path::{Path, PathBuf},
     process::Command,
+    time::SystemTime,
 };
 
 use crate::{
@@ -110,16 +113,27 @@ fn detect_one_app(
         }
     }
 
-    // 3) file detection (platform any_of + optional globs; first match wins)
+    // 3) file detection (platform any_of + globs anywhere; pick best by version)
     for raw in platform_any_of(&m.detect.files, ctx.platform).iter() {
         let r = Resolver::new(ctx, &rt.vars);
         let resolved = r.resolve(raw).with_context(|| {
             format!("apps.{name}: failed to resolve detect file pattern: {raw}")
         })?;
 
-        if let Some(found) = first_path_match(&resolved)? {
+        if let Some((found, ver)) = best_path_match_by_version(
+            ctx,
+            rt,
+            m.detect.version.as_ref(),
+            "file",
+            &resolved,
+        )? {
             detect.insert("file".to_string(), found);
-            attach_version_if_any(ctx, rt, m.detect.version.as_ref(), &mut detect)?;
+            if let Some(v) = ver {
+                detect.insert("version".to_string(), v);
+            } else {
+                attach_version_if_any(ctx, rt, m.detect.version.as_ref(), &mut detect)?;
+            }
+
             return Ok(Some(DetectedApp {
                 name: name.to_string(),
                 detect,
@@ -128,16 +142,27 @@ fn detect_one_app(
         }
     }
 
-    // 4) path detection (platform any_of + optional globs; first match wins)
+    // 4) path detection (platform any_of + globs anywhere; pick best by version)
     for raw in platform_any_of(&m.detect.paths, ctx.platform).iter() {
         let r = Resolver::new(ctx, &rt.vars);
         let resolved = r.resolve(raw).with_context(|| {
             format!("apps.{name}: failed to resolve detect path pattern: {raw}")
         })?;
 
-        if let Some(found) = first_path_match(&resolved)? {
+        if let Some((found, ver)) = best_path_match_by_version(
+            ctx,
+            rt,
+            m.detect.version.as_ref(),
+            "path",
+            &resolved,
+        )? {
             detect.insert("path".to_string(), found);
-            attach_version_if_any(ctx, rt, m.detect.version.as_ref(), &mut detect)?;
+            if let Some(v) = ver {
+                detect.insert("version".to_string(), v);
+            } else {
+                attach_version_if_any(ctx, rt, m.detect.version.as_ref(), &mut detect)?;
+            }
+
             return Ok(Some(DetectedApp {
                 name: name.to_string(),
                 detect,
@@ -618,65 +643,189 @@ fn platform_any_of(block: &PlatformAnyOf, p: Platform) -> &Vec<String> {
 
 /// Supports plain paths and simple globs like "/Applications/Houdini*.app" or "/opt/hfs*".
 /// Returns the FIRST match (full path string).
-fn first_path_match(pattern: &str) -> Result<Option<String>> {
-    if !pattern.contains('*') && !pattern.contains('?') {
-        return Ok(Path::new(pattern).exists().then(|| pattern.to_string()));
+fn has_glob(pattern: &str) -> bool {
+    pattern
+        .as_bytes()
+        .iter()
+        .any(|&b| matches!(b, b'*' | b'?' | b'['))
+}
+
+/// Expand either a plain path or a full glob pattern (globs can appear anywhere).
+/// Returns sorted matches for deterministic behavior.
+fn all_path_matches(pattern: &str) -> Result<Vec<String>> {
+    // Fast path: no glob chars => treat as normal path
+    if !has_glob(pattern) {
+        return Ok(Path::new(pattern)
+            .exists()
+            .then(|| vec![pattern.to_string()])
+            .unwrap_or_default());
     }
 
-    let (dir, glob) = split_dir_and_glob(pattern);
-    let dir_path = Path::new(&dir);
-    if !dir_path.exists() || !dir_path.is_dir() {
+    let mut out: Vec<String> = Vec::new();
+
+    for entry in glob(pattern).with_context(|| format!("invalid glob pattern: {pattern}"))? {
+        if let Ok(p) = entry {
+            // glob() only yields existing paths, but keep this explicit
+            if p.exists() {
+                out.push(p.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    out.sort();
+    Ok(out)
+}
+
+/// Extract numeric chunks for fuzzy version comparison.
+/// Works for:
+/// - "16.0.429804"
+/// - "16.0v8"
+/// - "Nuke16.0v10"
+fn extract_version_numbers(s: &str) -> Vec<u64> {
+    let mut nums = Vec::new();
+    let mut cur: Option<u64> = None;
+
+    for ch in s.chars() {
+        if let Some(d) = ch.to_digit(10) {
+            cur = Some(cur.unwrap_or(0).saturating_mul(10).saturating_add(d as u64));
+        } else if let Some(n) = cur.take() {
+            nums.push(n);
+        }
+    }
+    if let Some(n) = cur.take() {
+        nums.push(n);
+    }
+    nums
+}
+
+fn cmp_version_fuzzy(a: &str, b: &str) -> Ordering {
+    let na = extract_version_numbers(a);
+    let nb = extract_version_numbers(b);
+
+    // Compare numeric chunks first
+    let n = na.len().min(nb.len());
+    for i in 0..n {
+        match na[i].cmp(&nb[i]) {
+            Ordering::Equal => {}
+            other => return other,
+        }
+    }
+
+    // If all shared chunks equal, longer wins (e.g. 16.0.1 > 16.0)
+    match na.len().cmp(&nb.len()) {
+        Ordering::Equal => a.cmp(b), // deterministic tie-break
+        other => other,
+    }
+}
+
+fn mtime_of(path: &str) -> Option<SystemTime> {
+    fs::metadata(path).ok().and_then(|m| m.modified().ok())
+}
+
+fn first_version_for_candidate(
+    ctx: &ContextEnv,
+    rt: &RuntimeEnv,
+    spec: Option<&VersionDetectSpec>,
+    detect: &DetectVars,
+) -> Result<Option<String>> {
+    let Some(spec) = spec else {
         return Ok(None);
-    }
+    };
+    let Some(list) = spec.for_platform(ctx.platform) else {
+        return Ok(None);
+    };
 
-    let re = glob_to_regex(&glob)?;
-    let mut entries = fs::read_dir(dir_path)
-        .with_context(|| format!("failed to read_dir for glob: {pattern}"))?
-        .filter_map(|e| e.ok())
-        .collect::<Vec<_>>();
-
-    entries.sort_by_key(|e| e.file_name());
-
-    for e in entries {
-        let fname = e.file_name().to_string_lossy().to_string();
-        if re.is_match(&fname) {
-            let full = e.path().to_string_lossy().to_string();
-            return Ok(Some(full));
+    for vd in list.iter() {
+        if let Some(v) = detect_version(ctx, rt, detect, vd)? {
+            return Ok(Some(v));
         }
     }
 
     Ok(None)
 }
 
-fn split_dir_and_glob(p: &str) -> (String, String) {
-    let pb = PathBuf::from(p);
-    let dir = pb
-        .parent()
-        .map(|x| x.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string());
-    let glob = pb
-        .file_name()
-        .map(|x| x.to_string_lossy().to_string())
-        .unwrap_or_else(|| p.to_string());
-    (dir, glob)
-}
+/// Pick the best match among all matches for `pattern`.
+/// Priority:
+/// 1) candidates with a detected version beat those without
+/// 2) higher version (fuzzy numeric compare)
+/// 3) newer mtime
+/// 4) lexicographically higher path (deterministic)
+fn best_path_match_by_version(
+    ctx: &ContextEnv,
+    rt: &RuntimeEnv,
+    spec: Option<&VersionDetectSpec>,
+    detect_key: &str, // "path" or "file"
+    pattern: &str,
+) -> Result<Option<(String, Option<String>)>> {
+    let matches = all_path_matches(pattern)?;
+    if matches.is_empty() {
+        return Ok(None);
+    }
 
-fn glob_to_regex(glob: &str) -> Result<Regex> {
-    let mut s = String::new();
-    s.push('^');
-    for ch in glob.chars() {
-        match ch {
-            '*' => s.push_str(".*"),
-            '?' => s.push('.'),
-            '.' | '+' | '(' | ')' | '|' | '^' | '$' | '{' | '}' | '[' | ']' | '\\' => {
-                s.push('\\');
-                s.push(ch);
+    let mut best_path: Option<String> = None;
+    let mut best_ver: Option<String> = None;
+    let mut best_mtime: Option<SystemTime> = None;
+
+    for p in matches {
+        let mut tmp = DetectVars::new();
+        tmp.insert(detect_key.to_string(), p.clone());
+
+        let ver = first_version_for_candidate(ctx, rt, spec, &tmp)?;
+        let mt = mtime_of(&p);
+
+        let better = match (&best_path, &best_ver, &best_mtime) {
+            (None, _, _) => true,
+
+            (Some(_bp), Some(bv), Some(_bmt)) if ver.is_some() => {
+                // both have versions => compare versions
+                let v = ver.as_ref().unwrap();
+                match cmp_version_fuzzy(v, bv) {
+                    Ordering::Greater => true,
+                    Ordering::Less => false,
+                    Ordering::Equal => {
+                        // tie-break by mtime, then path
+                        match (mt, best_mtime) {
+                            (Some(a), Some(b)) => a
+                                .partial_cmp(&b)
+                                .unwrap_or(Ordering::Equal)
+                                == Ordering::Greater,
+                            (Some(_), None) => true,
+                            (None, Some(_)) => false,
+                            (None, None) => p > *_bp,
+                        }
+                    }
+                }
             }
-            _ => s.push(ch),
+
+            (Some(_bp), Some(_bv), _) if ver.is_none() => false, // prefer versioned
+
+            (Some(_bp), None, _) if ver.is_some() => true, // versioned beats unversioned
+
+            (Some(bp), None, Some(bmt)) if ver.is_none() => {
+                // neither has version => compare mtime
+                match (mt, Some(*bmt)) {
+                    (Some(a), Some(b)) => a
+                        .partial_cmp(&b)
+                        .unwrap_or(Ordering::Equal)
+                        == Ordering::Greater,
+                    (Some(_), None) => true,
+                    (None, Some(_)) => false,
+                    (None, None) => p > *bp,
+                }
+            }
+
+            (Some(bp), None, None) if ver.is_none() => p > *bp,
+            _ => false,
+        };
+
+        if better {
+            best_path = Some(p);
+            best_ver = ver;
+            best_mtime = mt;
         }
     }
-    s.push('$');
-    Ok(Regex::new(&s)?)
+
+    Ok(best_path.map(|p| (p, best_ver)))
 }
 
 fn first_present_env(vars: &BTreeMap<String, String>, keys: &[String]) -> Option<(String, String)> {

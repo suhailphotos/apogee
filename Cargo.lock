@@ -19,10 +19,11 @@ checksum = "b0674a1ddeecb70197781e945de4b3b8ffb61fa939a5597bcf48503737663100"
 
 [[package]]
 name = "apogee"
-version = "0.1.1-alpha.1"
+version = "0.1.1-alpha.2"
 dependencies = [
  "anyhow",
  "dirs",
+ "glob",
  "minijinja",
  "regex",
  "serde",
@@ -79,6 +80,12 @@ dependencies = [
  "libc",
  "wasi",
 ]
+
+[[package]]
+name = "glob"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "hashbrown"
