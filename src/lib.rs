@@ -8,6 +8,7 @@ pub mod hooks;
 pub mod resolve;
 pub mod runtime;
 pub mod templates;
+pub mod init;
 
 // Convenience re-exports
 pub use deps::{

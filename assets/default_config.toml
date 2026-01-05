@@ -1,0 +1,259 @@
+# ===================================================================
+# apogee config (starter)
+#
+# Goals:
+#   - apogee detects context (platform, shell, host)
+#   - modules become active via simple detect rules
+#   - only active modules emit env / paths / aliases / functions
+#
+# Out of the box:
+#   - Dropbox support (exports only $DROPBOX)
+#   - a few common CLI tools (git, editor, starship, zoxide, fzf, rg, fd, uv)
+#
+# Next steps for users:
+#   - add aliases in [global.aliases.*]
+#   - add more modules under [modules.apps.*] / [modules.cloud.*]
+#   - add function files under {config_dir}/functions/
+# ===================================================================
+
+[apogee]
+schema_version = 2
+
+# This is only a fallback. Your shell init snippet will set APOGEE_SHELL explicitly.
+default_shell = "zsh"
+
+# Where apogee can store per-user env overlays (optional)
+env_file     = "{config_dir}/.env"
+secrets_file = "{config_dir}/secrets.env"
+
+[modules]
+enable_cloud = true
+enable_apps  = true
+
+# (optional features, disabled by default in this starter)
+enable_hooks = false
+enable_templates = false
+
+# ===================================================================
+# GLOBAL (platform/shell-only things)
+# ===================================================================
+
+[global]
+
+[global.env]
+XDG_CONFIG_HOME = "{home}/.config"
+
+[global.aliases.platform.mac]
+o = "open ."
+
+[global.aliases.platform.linux]
+o = "xdg-open ."
+
+[global.aliases.platform.windows]
+o = "explorer.exe ."
+
+[global.aliases.platform.wsl]
+o = "explorer.exe ."
+
+# ===================================================================
+# MODULES: CLOUD
+# ===================================================================
+
+[modules.cloud]
+enabled = true
+
+# -------------------------------------------------------------------
+# Dropbox
+# Exports:
+#   DROPBOX = detected path
+# -------------------------------------------------------------------
+[modules.cloud.dropbox]
+enabled   = true
+kind      = "storage"
+platforms = ["mac", "linux", "windows", "wsl", "other"]
+
+[modules.cloud.dropbox.detect.paths.mac]
+any_of = [
+  "{home}/Library/CloudStorage/Dropbox",
+  "{home}/Dropbox",
+]
+
+[modules.cloud.dropbox.detect.paths.linux]
+any_of = ["{home}/Dropbox"]
+
+[modules.cloud.dropbox.detect.paths.windows]
+any_of = ["{userprofile}/Dropbox"]
+
+[modules.cloud.dropbox.detect.paths.wsl]
+any_of = [
+  "{userprofile}/Dropbox",
+  "/mnt/c/Users/{username}/Dropbox",
+]
+
+[modules.cloud.dropbox.detect.paths.other]
+any_of = ["{home}/Dropbox"]
+
+[modules.cloud.dropbox.emit.env]
+DROPBOX = "{detect.path}"
+
+# ===================================================================
+# MODULES: APPS (common CLI tools)
+# ===================================================================
+
+[modules.apps]
+enabled = true
+
+# --------------------------------------------------
+# core_userpaths: ~/.local/bin
+# --------------------------------------------------
+[modules.apps.core_userpaths]
+enabled   = true
+kind      = "cli"
+priority  = 20
+platforms = ["mac", "linux", "wsl", "other", "windows"]
+
+[modules.apps.core_userpaths.detect.paths.mac]
+any_of = ["{home}/.local/bin"]
+[modules.apps.core_userpaths.detect.paths.linux]
+any_of = ["{home}/.local/bin"]
+[modules.apps.core_userpaths.detect.paths.wsl]
+any_of = ["{home}/.local/bin"]
+[modules.apps.core_userpaths.detect.paths.other]
+any_of = ["{home}/.local/bin"]
+[modules.apps.core_userpaths.detect.paths.windows]
+any_of = ["{userprofile}/.local/bin"]
+
+[modules.apps.core_userpaths.emit.paths]
+prepend_if_exists = ["{home}/.local/bin"]
+append_if_exists  = []
+
+# --------------------------------------------------
+# core_editor: picks first available from (nvim, vim, vi)
+# --------------------------------------------------
+[modules.apps.core_editor]
+enabled = true
+kind = "cli"
+priority = 30
+platforms = []
+
+[modules.apps.core_editor.detect.commands]
+any_of = ["nvim", "vim", "vi"]
+
+[modules.apps.core_editor.emit.env]
+EDITOR     = "{detect.command}"
+VISUAL     = "{detect.command}"
+GIT_EDITOR = "{detect.command}"
+
+# --------------------------------------------------
+# git
+# --------------------------------------------------
+[modules.apps.git]
+enabled = true
+kind = "cli"
+priority = 40
+platforms = []
+
+[modules.apps.git.detect.commands]
+any_of = ["git"]
+
+# Add your own aliases/functions later if you want:
+# [modules.apps.git.emit.aliases]
+# gs = "git status"
+
+# --------------------------------------------------
+# starship
+# --------------------------------------------------
+[modules.apps.starship]
+enabled = true
+kind = "cli"
+priority = 70
+platforms = ["mac", "linux", "windows", "wsl", "other"]
+
+[modules.apps.starship.detect.commands]
+any_of = ["starship"]
+
+[modules.apps.starship.emit.env]
+STARSHIP_CONFIG = "{xdg_config_home}/starship/starship_{shell}.toml"
+
+[[modules.apps.starship.emit.init]]
+command = "{detect.command_path}"
+args = ["init", "{shell_init}"]
+pwsh_out_string = false
+
+# --------------------------------------------------
+# zoxide
+# --------------------------------------------------
+[modules.apps.zoxide]
+enabled = true
+kind = "cli"
+priority = 80
+platforms = ["mac", "linux", "windows", "wsl", "other"]
+
+[modules.apps.zoxide.detect.commands]
+any_of = ["zoxide"]
+
+[[modules.apps.zoxide.emit.init]]
+command = "{detect.command_path}"
+args = ["init", "{shell_init}"]
+pwsh_out_string = true
+
+# --------------------------------------------------
+# fzf (optional)
+# --------------------------------------------------
+[modules.apps.fzf]
+enabled = true
+kind = "cli"
+priority = 120
+
+[modules.apps.fzf.detect.commands]
+any_of = ["fzf"]
+
+# You can add completion/key-bindings paths later if you want.
+
+# --------------------------------------------------
+# ripgrep (rg)
+# --------------------------------------------------
+[modules.apps.ripgrep]
+enabled  = true
+kind     = "cli"
+priority = 130
+
+[modules.apps.ripgrep.detect.commands]
+any_of = ["rg"]
+
+# --------------------------------------------------
+# fd
+# --------------------------------------------------
+[modules.apps.fd]
+enabled  = true
+kind     = "cli"
+priority = 135
+
+[modules.apps.fd.detect.commands]
+any_of = ["fd", "fdfind"]
+
+# --------------------------------------------------
+# uv (optional)
+# --------------------------------------------------
+[modules.apps.uv]
+enabled   = true
+kind      = "cli"
+priority  = 100
+platforms = ["mac", "linux", "windows", "wsl", "other"]
+
+[modules.apps.uv.detect.commands]
+any_of = ["uv"]
+
+# ===================================================================
+# HOOKS (example only - disabled by default)
+# ===================================================================
+#
+# If you enable hooks:
+#
+# [modules.hooks]
+# enabled = true
+#
+# [[modules.hooks.items]]
+# name = "example"
+# enabled = true
+# script = "{config_dir}/hooks/example.{shell_ext}"
