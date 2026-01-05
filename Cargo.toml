@@ -9,7 +9,7 @@ repository = "https://github.com/orbyts/apogee"
 homepage = "https://github.com/orbyts/apogee"
 keywords = ["shell", "zsh", "bash", "powershell", "config"]
 categories = ["command-line-utilities"]
-include = ["src/**", "Cargo.toml", "README.md", "LICENSE*", "CHANGELOG.md"]
+include = ["src/**", "assets/**", "Cargo.toml", "README.md", "LICENSE*", "CHANGELOG.md"]
 
 [dependencies]
 anyhow = "1"
